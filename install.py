@@ -178,33 +178,19 @@ def install_dependencies():
             print("Please check your connection and try again.")
             sys.exit(1)
         
-        # List of packages to install with pip
-        packages_cuda124 = [
-            (f"pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124", "Installing PyTorch 2.5.1 with CUDA 12.4"),
-            (f"pip install huggingface_hub", "Installing huggingface_hub"),
-            (f"pip install accelerate==1.5.2 --no-deps", "Installing accelerate without dependencies"),
-            ("pip install -r requirements.txt", "Installing basic dependencies"), # install AFTER the pytorch
-        ]
-
         packages_cuda128 = [
-            (f"pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128", "Installing PyTorch with CUDA 12.8"),
+            (f"pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128", "Installing PyTorch 2.7.0 with CUDA 12.8"),
             (f"pip install huggingface_hub", "Installing huggingface_hub"),
-            (f"pip install accelerate --no-deps", "Installing latest accelerate without dependencies"),
             ("pip install -r requirements.txt", "Installing basic dependencies"), # install AFTER the pytorch
         ]
         
-        # Local wheel files
-        wheel_files_cuda124 = {
-            "custom_rasterizer": "whl-cuda124/custom_rasterizer-0.1-cp311-cp311-win_amd64.whl",
-            "mesh_processor": "whl-cuda124/mesh_processor-0.1.0-cp311-cp311-win_amd64.whl",
-        }
         wheel_files_cuda128 = { 
-            "custom_rasterizer": "whl-cuda128/custom_rasterizer-0.1-cp311-cp311-win_amd64.whl",
-            "mesh_processor": "whl-cuda128/mesh_processor-0.1.0-cp311-cp311-win_amd64.whl",
+            "cumm_cu128": "whl/cumm_cu128-0.7.13-cp311-cp311-win_amd64.whl",
+            "spconv_cu128": "whl/spconv_cu128-2.3.8-cp311-cp311-win_amd64.whl",
         }
-        #choose packages + wheels based on the current GPU
-        packages    = packages_cuda128 if is_rtx5000_or_newer() else packages_cuda124
-        wheel_files = wheel_files_cuda128 if is_rtx5000_or_newer() else wheel_files_cuda124
+        #choose packages + wheels based on the current GPU (...actually, just going with cuda 12.8 for either GPU type)
+        packages    = packages_cuda128    #commented the rest: if is_rtx5000_or_newer() else packages_cuda124
+        wheel_files = wheel_files_cuda128 #commented the rest: if is_rtx5000_or_newer() else wheel_files_cuda124
         
         # Install packages (with retry)
         for cmd, desc in packages:
@@ -217,11 +203,12 @@ def install_dependencies():
                 raise InstallationError(f"Required wheel file not found: {wheel}")
             run_command_with_retry(f"pip install {wheel}", f"Installing {name} from local wheel")
         
-        # Install Gradio last
-        run_command_with_retry(
-            "pip install gradio==4.44.1 gradio_litmodel3d==0.0.1",
-            "Installing gradio for web app"
-        )
+        # Commented out gradio, not used here
+        ## Install Gradio last
+        #run_command_with_retry(
+        #    "pip install gradio==4.44.1 gradio_litmodel3d==0.0.1",
+        #    "Installing gradio for web app"
+        #)
         print("\nInstallation completed successfully!")
     except InstallationError as e:
         print(f"\nInstallation failed: {str(e)}")
