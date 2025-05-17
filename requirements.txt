@@ -1,6 +1,5 @@
 # For StableNormal
 diffusers>=0.28.0
-gradio>=4.32.1
 accelerate
 
 # For BirefNet
@@ -15,3 +14,4 @@ scipy
 trimesh
 numpy==1.26.4
 scikit-image
+gradio>=4.32.1

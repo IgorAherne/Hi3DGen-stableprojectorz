@@ -203,12 +203,11 @@ def install_dependencies():
                 raise InstallationError(f"Required wheel file not found: {wheel}")
             run_command_with_retry(f"pip install {wheel}", f"Installing {name} from local wheel")
         
-        # Commented out gradio, not used here
-        ## Install Gradio last
-        #run_command_with_retry(
-        #    "pip install gradio==4.44.1 gradio_litmodel3d==0.0.1",
-        #    "Installing gradio for web app"
-        #)
+        # Install Gradio last
+        run_command_with_retry(
+            "pip install gradio==4.44.1 gradio_litmodel3d==0.0.1",
+            "Installing gradio for web app"
+        )
         print("\nInstallation completed successfully!")
     except InstallationError as e:
         print(f"\nInstallation failed: {str(e)}")
