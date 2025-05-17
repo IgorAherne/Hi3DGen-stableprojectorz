@@ -1,0 +1,375 @@
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
+  <PropertyGroup>
+    <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
+    <SchemaVersion>2.0</SchemaVersion>
+    <ProjectGuid>b51df9cd-f880-42b3-bdd4-a728fd313418</ProjectGuid>
+    <ProjectHome>.</ProjectHome>
+    <StartupFile>
+    </StartupFile>
+    <SearchPath>
+    </SearchPath>
+    <WorkingDirectory>.</WorkingDirectory>
+    <OutputPath>.</OutputPath>
+    <Name>Stable3DGen-stableprojectorz</Name>
+    <RootNamespace>Stable3DGen-stableprojectorz</RootNamespace>
+    <InterpreterId>Global|VisualStudio|venv</InterpreterId>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
+    <DebugSymbols>true</DebugSymbols>
+    <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)' == 'Release' ">
+    <DebugSymbols>true</DebugSymbols>
+    <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
+  </PropertyGroup>
+  <ItemGroup>
+    <InterpreterReference Include="Global|VisualStudio|venv" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="api_spz\" />
+    <Folder Include="api_spz\core\" />
+    <Folder Include="api_spz\routes\" />
+    <Folder Include="api_spz\routes\__pycache__\" />
+    <Folder Include="api_spz\__pycache__\" />
+    <Folder Include="assets\" />
+    <Folder Include="assets\example_image\" />
+    <Folder Include="assets\example_multi_image\" />
+    <Folder Include="hi3dgen\" />
+    <Folder Include="hi3dgen\models\" />
+    <Folder Include="hi3dgen\models\structured_latent_vae\" />
+    <Folder Include="hi3dgen\models\__pycache__\" />
+    <Folder Include="hi3dgen\modules\" />
+    <Folder Include="hi3dgen\modules\attention\" />
+    <Folder Include="hi3dgen\modules\attention\__pycache__\" />
+    <Folder Include="hi3dgen\modules\sparse\" />
+    <Folder Include="hi3dgen\modules\sparse\attention\" />
+    <Folder Include="hi3dgen\modules\sparse\conv\" />
+    <Folder Include="hi3dgen\modules\sparse\conv\__pycache__\" />
+    <Folder Include="hi3dgen\modules\sparse\transformer\" />
+    <Folder Include="hi3dgen\modules\sparse\__pycache__\" />
+    <Folder Include="hi3dgen\modules\transformer\" />
+    <Folder Include="hi3dgen\modules\transformer\__pycache__\" />
+    <Folder Include="hi3dgen\modules\__pycache__\" />
+    <Folder Include="hi3dgen\pipelines\" />
+    <Folder Include="hi3dgen\pipelines\samplers\" />
+    <Folder Include="hi3dgen\pipelines\samplers\__pycache__\" />
+    <Folder Include="hi3dgen\pipelines\__pycache__\" />
+    <Folder Include="hi3dgen\representations\" />
+    <Folder Include="hi3dgen\representations\mesh\" />
+    <Folder Include="hi3dgen\representations\mesh\__pycache__\" />
+    <Folder Include="hi3dgen\representations\__pycache__\" />
+    <Folder Include="hi3dgen\__pycache__\" />
+    <Folder Include="tmp\" />
+    <Folder Include="weights\" />
+    <Folder Include="weights\BiRefNet\" />
+    <Folder Include="weights\BiRefNet\.cache\" />
+    <Folder Include="weights\BiRefNet\.cache\huggingface\" />
+    <Folder Include="weights\BiRefNet\.cache\huggingface\download\" />
+    <Folder Include="weights\trellis-normal-v0-1\" />
+    <Folder Include="weights\trellis-normal-v0-1\.cache\" />
+    <Folder Include="weights\trellis-normal-v0-1\.cache\huggingface\" />
+    <Folder Include="weights\trellis-normal-v0-1\.cache\huggingface\download\" />
+    <Folder Include="weights\trellis-normal-v0-1\.cache\huggingface\download\ckpts\" />
+    <Folder Include="weights\trellis-normal-v0-1\ckpts\" />
+    <Folder Include="weights\yoso-normal-v1-8-1\" />
+    <Folder Include="weights\yoso-normal-v1-8-1\.cache\" />
+    <Folder Include="weights\yoso-normal-v1-8-1\.cache\huggingface\" />
+    <Folder Include="weights\yoso-normal-v1-8-1\.cache\huggingface\download\" />
+    <Folder Include="weights\yoso-normal-v1-8-1\.cache\huggingface\download\controlnet\" />
+    <Folder Include="weights\yoso-normal-v1-8-1\.cache\huggingface\download\unet\" />
+    <Folder Include="weights\yoso-normal-v1-8-1\.cache\huggingface\download\vae\" />
+    <Folder Include="weights\yoso-normal-v1-8-1\controlnet\" />
+    <Folder Include="weights\yoso-normal-v1-8-1\unet\" />
+    <Folder Include="weights\yoso-normal-v1-8-1\vae\" />
+    <Folder Include="whl\" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="api_spz\core\exceptions.py" />
+    <Compile Include="api_spz\core\files_manage.py" />
+    <Compile Include="api_spz\core\models_pydantic.py" />
+    <Compile Include="api_spz\core\state_manage.py" />
+    <Compile Include="api_spz\core\__init__.py" />
+    <Compile Include="api_spz\main_api.py" />
+    <Compile Include="api_spz\routes\generation.py" />
+    <Compile Include="api_spz\routes\__init__.py" />
+    <Compile Include="api_spz\__init__.py" />
+    <Compile Include="app.py" />
+    <Compile Include="hi3dgen\models\sparse_structure_flow.py" />
+    <Compile Include="hi3dgen\models\sparse_structure_vae.py" />
+    <Compile Include="hi3dgen\models\structured_latent_flow.py" />
+    <Compile Include="hi3dgen\models\structured_latent_vae\base.py" />
+    <Compile Include="hi3dgen\models\structured_latent_vae\decoder_mesh.py" />
+    <Compile Include="hi3dgen\models\structured_latent_vae\encoder.py" />
+    <Compile Include="hi3dgen\models\structured_latent_vae\__init__.py" />
+    <Compile Include="hi3dgen\models\__init__.py" />
+    <Compile Include="hi3dgen\modules\attention\full_attn.py" />
+    <Compile Include="hi3dgen\modules\attention\modules.py" />
+    <Compile Include="hi3dgen\modules\attention\__init__.py" />
+    <Compile Include="hi3dgen\modules\norm.py" />
+    <Compile Include="hi3dgen\modules\sparse\attention\full_attn.py" />
+    <Compile Include="hi3dgen\modules\sparse\attention\modules.py" />
+    <Compile Include="hi3dgen\modules\sparse\attention\serialized_attn.py" />
+    <Compile Include="hi3dgen\modules\sparse\attention\windowed_attn.py" />
+    <Compile Include="hi3dgen\modules\sparse\attention\__init__.py" />
+    <Compile Include="hi3dgen\modules\sparse\basic.py" />
+    <Compile Include="hi3dgen\modules\sparse\conv\conv_spconv.py" />
+    <Compile Include="hi3dgen\modules\sparse\conv\conv_torchsparse.py" />
+    <Compile Include="hi3dgen\modules\sparse\conv\__init__.py" />
+    <Compile Include="hi3dgen\modules\sparse\linear.py" />
+    <Compile Include="hi3dgen\modules\sparse\nonlinearity.py" />
+    <Compile Include="hi3dgen\modules\sparse\norm.py" />
+    <Compile Include="hi3dgen\modules\sparse\spatial.py" />
+    <Compile Include="hi3dgen\modules\sparse\transformer\blocks.py" />
+    <Compile Include="hi3dgen\modules\sparse\transformer\modulated.py" />
+    <Compile Include="hi3dgen\modules\sparse\transformer\__init__.py" />
+    <Compile Include="hi3dgen\modules\sparse\__init__.py" />
+    <Compile Include="hi3dgen\modules\spatial.py" />
+    <Compile Include="hi3dgen\modules\transformer\blocks.py" />
+    <Compile Include="hi3dgen\modules\transformer\modulated.py" />
+    <Compile Include="hi3dgen\modules\transformer\__init__.py" />
+    <Compile Include="hi3dgen\modules\utils.py" />
+    <Compile Include="hi3dgen\pipelines\base.py" />
+    <Compile Include="hi3dgen\pipelines\hi3dgen.py" />
+    <Compile Include="hi3dgen\pipelines\samplers\base.py" />
+    <Compile Include="hi3dgen\pipelines\samplers\classifier_free_guidance_mixin.py" />
+    <Compile Include="hi3dgen\pipelines\samplers\flow_euler.py" />
+    <Compile Include="hi3dgen\pipelines\samplers\guidance_interval_mixin.py" />
+    <Compile Include="hi3dgen\pipelines\samplers\__init__.py" />
+    <Compile Include="hi3dgen\pipelines\__init__.py" />
+    <Compile Include="hi3dgen\representations\mesh\cube2mesh.py" />
+    <Compile Include="hi3dgen\representations\mesh\utils_cube.py" />
+    <Compile Include="hi3dgen\representations\mesh\__init__.py" />
+    <Compile Include="hi3dgen\representations\__init__.py" />
+    <Compile Include="hi3dgen\__init__.py" />
+    <Compile Include="install.py" />
+    <Compile Include="weights\BiRefNet\birefnet.py" />
+    <Compile Include="weights\BiRefNet\BiRefNet_config.py" />
+    <Compile Include="weights\BiRefNet\handler.py" />
+    <Compile Include="weights\yoso-normal-v1-8-1\controlnet\controlnetvae.py" />
+  </ItemGroup>
+  <ItemGroup>
+    <Content Include="api_spz\api-documentation.html" />
+    <Content Include="api_spz\routes\layout_generation_3d_panel.txt" />
+    <Content Include="api_spz\routes\__pycache__\generation.cpython-311.pyc" />
+    <Content Include="api_spz\routes\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="api_spz\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="assets\example_image\0.png" />
+    <Content Include="assets\example_image\1.png" />
+    <Content Include="assets\example_image\102.png" />
+    <Content Include="assets\example_image\104.png" />
+    <Content Include="assets\example_image\105.png" />
+    <Content Include="assets\example_image\106.png" />
+    <Content Include="assets\example_image\111.png" />
+    <Content Include="assets\example_image\113.png" />
+    <Content Include="assets\example_image\115.png" />
+    <Content Include="assets\example_image\116.png" />
+    <Content Include="assets\example_image\117.png" />
+    <Content Include="assets\example_image\118.png" />
+    <Content Include="assets\example_image\119.png" />
+    <Content Include="assets\example_image\12.png" />
+    <Content Include="assets\example_image\121.png" />
+    <Content Include="assets\example_image\122.png" />
+    <Content Include="assets\example_image\123.png" />
+    <Content Include="assets\example_image\124.png" />
+    <Content Include="assets\example_image\125.png" />
+    <Content Include="assets\example_image\126.png" />
+    <Content Include="assets\example_image\127.png" />
+    <Content Include="assets\example_image\128.png" />
+    <Content Include="assets\example_image\13.png" />
+    <Content Include="assets\example_image\137.png" />
+    <Content Include="assets\example_image\138.png" />
+    <Content Include="assets\example_image\140.png" />
+    <Content Include="assets\example_image\141.png" />
+    <Content Include="assets\example_image\142.png" />
+    <Content Include="assets\example_image\144.png" />
+    <Content Include="assets\example_image\145.png" />
+    <Content Include="assets\example_image\146.png" />
+    <Content Include="assets\example_image\147.png" />
+    <Content Include="assets\example_image\148.png" />
+    <Content Include="assets\example_image\15.png" />
+    <Content Include="assets\example_image\150.png" />
+    <Content Include="assets\example_image\151.png" />
+    <Content Include="assets\example_image\152.png" />
+    <Content Include="assets\example_image\153.png" />
+    <Content Include="assets\example_image\154.png" />
+    <Content Include="assets\example_image\156.png" />
+    <Content Include="assets\example_image\157.png" />
+    <Content Include="assets\example_image\16.png" />
+    <Content Include="assets\example_image\161.png" />
+    <Content Include="assets\example_image\162.png" />
+    <Content Include="assets\example_image\164.png" />
+    <Content Include="assets\example_image\166.png" />
+    <Content Include="assets\example_image\167.png" />
+    <Content Include="assets\example_image\17.png" />
+    <Content Include="assets\example_image\171.png" />
+    <Content Include="assets\example_image\176.png" />
+    <Content Include="assets\example_image\179.png" />
+    <Content Include="assets\example_image\182.png" />
+    <Content Include="assets\example_image\183.png" />
+    <Content Include="assets\example_image\189.png" />
+    <Content Include="assets\example_image\19.png" />
+    <Content Include="assets\example_image\20.png" />
+    <Content Include="assets\example_image\22.png" />
+    <Content Include="assets\example_image\26.png" />
+    <Content Include="assets\example_image\27.png" />
+    <Content Include="assets\example_image\28.png" />
+    <Content Include="assets\example_image\29.png" />
+    <Content Include="assets\example_image\3.png" />
+    <Content Include="assets\example_image\30.png" />
+    <Content Include="assets\example_image\31.png" />
+    <Content Include="assets\example_image\32.png" />
+    <Content Include="assets\example_image\33.png" />
+    <Content Include="assets\example_image\34.png" />
+    <Content Include="assets\example_image\38.png" />
+    <Content Include="assets\example_image\4.png" />
+    <Content Include="assets\example_image\43.png" />
+    <Content Include="assets\example_image\44.png" />
+    <Content Include="assets\example_image\45.png" />
+    <Content Include="assets\example_image\46.png" />
+    <Content Include="assets\example_image\48.png" />
+    <Content Include="assets\example_image\50.png" />
+    <Content Include="assets\example_image\54.png" />
+    <Content Include="assets\example_image\55.png" />
+    <Content Include="assets\example_image\56.png" />
+    <Content Include="assets\example_image\60.png" />
+    <Content Include="assets\example_image\63.png" />
+    <Content Include="assets\example_image\66.png" />
+    <Content Include="assets\example_image\67.png" />
+    <Content Include="assets\example_image\68.png" />
+    <Content Include="assets\example_image\69.png" />
+    <Content Include="assets\example_image\7.png" />
+    <Content Include="assets\example_image\70.png" />
+    <Content Include="assets\example_image\71.png" />
+    <Content Include="assets\example_image\72.png" />
+    <Content Include="assets\example_image\74.png" />
+    <Content Include="assets\example_image\76.png" />
+    <Content Include="assets\example_image\77.png" />
+    <Content Include="assets\example_image\78.png" />
+    <Content Include="assets\example_image\79.png" />
+    <Content Include="assets\example_image\83.png" />
+    <Content Include="assets\example_image\9.png" />
+    <Content Include="assets\example_image\94.png" />
+    <Content Include="assets\example_image\95.png" />
+    <Content Include="assets\example_image\97.png" />
+    <Content Include="assets\example_multi_image\character_1.png" />
+    <Content Include="assets\example_multi_image\character_2.png" />
+    <Content Include="assets\example_multi_image\character_3.png" />
+    <Content Include="assets\example_multi_image\mushroom_1.png" />
+    <Content Include="assets\example_multi_image\mushroom_2.png" />
+    <Content Include="assets\example_multi_image\mushroom_3.png" />
+    <Content Include="assets\example_multi_image\orangeguy_1.png" />
+    <Content Include="assets\example_multi_image\orangeguy_2.png" />
+    <Content Include="assets\example_multi_image\orangeguy_3.png" />
+    <Content Include="assets\example_multi_image\popmart_1.png" />
+    <Content Include="assets\example_multi_image\popmart_2.png" />
+    <Content Include="assets\example_multi_image\popmart_3.png" />
+    <Content Include="assets\example_multi_image\rabbit_1.png" />
+    <Content Include="assets\example_multi_image\rabbit_2.png" />
+    <Content Include="assets\example_multi_image\rabbit_3.png" />
+    <Content Include="assets\example_multi_image\tiger_1.png" />
+    <Content Include="assets\example_multi_image\tiger_2.png" />
+    <Content Include="assets\example_multi_image\tiger_3.png" />
+    <Content Include="assets\example_multi_image\yoimiya_1.png" />
+    <Content Include="assets\example_multi_image\yoimiya_2.png" />
+    <Content Include="assets\example_multi_image\yoimiya_3.png" />
+    <Content Include="assets\teaser.gif" />
+    <Content Include="hi3dgen\models\__pycache__\sparse_structure_flow.cpython-311.pyc" />
+    <Content Include="hi3dgen\models\__pycache__\sparse_structure_vae.cpython-311.pyc" />
+    <Content Include="hi3dgen\models\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="hi3dgen\modules\attention\__pycache__\full_attn.cpython-311.pyc" />
+    <Content Include="hi3dgen\modules\attention\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="hi3dgen\modules\sparse\conv\__pycache__\conv_spconv.cpython-311.pyc" />
+    <Content Include="hi3dgen\modules\sparse\conv\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="hi3dgen\modules\sparse\__pycache__\basic.cpython-311.pyc" />
+    <Content Include="hi3dgen\modules\sparse\__pycache__\linear.cpython-311.pyc" />
+    <Content Include="hi3dgen\modules\sparse\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="hi3dgen\modules\transformer\__pycache__\blocks.cpython-311.pyc" />
+    <Content Include="hi3dgen\modules\transformer\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="hi3dgen\modules\__pycache__\norm.cpython-311.pyc" />
+    <Content Include="hi3dgen\modules\__pycache__\spatial.cpython-311.pyc" />
+    <Content Include="hi3dgen\modules\__pycache__\utils.cpython-311.pyc" />
+    <Content Include="hi3dgen\pipelines\samplers\__pycache__\base.cpython-311.pyc" />
+    <Content Include="hi3dgen\pipelines\samplers\__pycache__\classifier_free_guidance_mixin.cpython-311.pyc" />
+    <Content Include="hi3dgen\pipelines\samplers\__pycache__\flow_euler.cpython-311.pyc" />
+    <Content Include="hi3dgen\pipelines\samplers\__pycache__\guidance_interval_mixin.cpython-311.pyc" />
+    <Content Include="hi3dgen\pipelines\samplers\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="hi3dgen\pipelines\__pycache__\base.cpython-311.pyc" />
+    <Content Include="hi3dgen\pipelines\__pycache__\hi3dgen.cpython-311.pyc" />
+    <Content Include="hi3dgen\pipelines\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="hi3dgen\representations\mesh\__pycache__\cube2mesh.cpython-311.pyc" />
+    <Content Include="hi3dgen\representations\mesh\__pycache__\utils_cube.cpython-311.pyc" />
+    <Content Include="hi3dgen\representations\mesh\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="hi3dgen\representations\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="hi3dgen\__pycache__\__init__.cpython-311.pyc" />
+    <Content Include="weights\BiRefNet\.cache\huggingface\.gitignore" />
+    <Content Include="weights\BiRefNet\.cache\huggingface\download\.gitattributes.metadata" />
+    <Content Include="weights\BiRefNet\.cache\huggingface\download\.gitignore.metadata" />
+    <Content Include="weights\BiRefNet\.cache\huggingface\download\birefnet.py.metadata" />
+    <Content Include="weights\BiRefNet\.cache\huggingface\download\BiRefNet_config.py.metadata" />
+    <Content Include="weights\BiRefNet\.cache\huggingface\download\config.json.metadata" />
+    <Content Include="weights\BiRefNet\.cache\huggingface\download\handler.py.metadata" />
+    <Content Include="weights\BiRefNet\.cache\huggingface\download\model.safetensors.metadata" />
+    <Content Include="weights\BiRefNet\.cache\huggingface\download\README.md.metadata" />
+    <Content Include="weights\BiRefNet\.cache\huggingface\download\requirements.txt.metadata" />
+    <Content Include="weights\BiRefNet\.gitattributes" />
+    <Content Include="weights\BiRefNet\.gitignore" />
+    <Content Include="weights\BiRefNet\config.json" />
+    <Content Include="weights\BiRefNet\model.safetensors" />
+    <Content Include="weights\BiRefNet\README.md" />
+    <Content Include="weights\BiRefNet\requirements.txt" />
+    <Content Include="weights\trellis-normal-v0-1\.cache\huggingface\.gitignore" />
+    <Content Include="weights\trellis-normal-v0-1\.cache\huggingface\download\.gitattributes.metadata" />
+    <Content Include="weights\trellis-normal-v0-1\.cache\huggingface\download\ckpts\slat_dec_mesh_swin8_B_64l8m256c_fp16.json.metadata" />
+    <Content Include="weights\trellis-normal-v0-1\.cache\huggingface\download\ckpts\slat_dec_mesh_swin8_B_64l8m256c_fp16.safetensors.metadata" />
+    <Content Include="weights\trellis-normal-v0-1\.cache\huggingface\download\ckpts\slat_flow_normal_dit_L_64l8p2_fp16.json.metadata" />
+    <Content Include="weights\trellis-normal-v0-1\.cache\huggingface\download\ckpts\slat_flow_normal_dit_L_64l8p2_fp16.safetensors.metadata" />
+    <Content Include="weights\trellis-normal-v0-1\.cache\huggingface\download\ckpts\ss_dec_conv3d_16l8_fp16.json.metadata" />
+    <Content Include="weights\trellis-normal-v0-1\.cache\huggingface\download\ckpts\ss_dec_conv3d_16l8_fp16.safetensors.metadata" />
+    <Content Include="weights\trellis-normal-v0-1\.cache\huggingface\download\ckpts\ss_flow_normal_dit_L_16l8_fp16.json.metadata" />
+    <Content Include="weights\trellis-normal-v0-1\.cache\huggingface\download\ckpts\ss_flow_normal_dit_L_16l8_fp16.safetensors.metadata" />
+    <Content Include="weights\trellis-normal-v0-1\.cache\huggingface\download\pipeline.json.metadata" />
+    <Content Include="weights\trellis-normal-v0-1\.cache\huggingface\download\README.md.metadata" />
+    <Content Include="weights\trellis-normal-v0-1\.gitattributes" />
+    <Content Include="weights\trellis-normal-v0-1\ckpts\slat_dec_mesh_swin8_B_64l8m256c_fp16.json" />
+    <Content Include="weights\trellis-normal-v0-1\ckpts\slat_dec_mesh_swin8_B_64l8m256c_fp16.safetensors" />
+    <Content Include="weights\trellis-normal-v0-1\ckpts\slat_flow_normal_dit_L_64l8p2_fp16.json" />
+    <Content Include="weights\trellis-normal-v0-1\ckpts\slat_flow_normal_dit_L_64l8p2_fp16.safetensors" />
+    <Content Include="weights\trellis-normal-v0-1\ckpts\ss_dec_conv3d_16l8_fp16.json" />
+    <Content Include="weights\trellis-normal-v0-1\ckpts\ss_dec_conv3d_16l8_fp16.safetensors" />
+    <Content Include="weights\trellis-normal-v0-1\ckpts\ss_flow_normal_dit_L_16l8_fp16.json" />
+    <Content Include="weights\trellis-normal-v0-1\ckpts\ss_flow_normal_dit_L_16l8_fp16.safetensors" />
+    <Content Include="weights\trellis-normal-v0-1\pipeline.json" />
+    <Content Include="weights\trellis-normal-v0-1\README.md" />
+    <Content Include="weights\yoso-normal-v1-8-1\.cache\huggingface\.gitignore" />
+    <Content Include="weights\yoso-normal-v1-8-1\.cache\huggingface\download\.gitattributes.metadata" />
+    <Content Include="weights\yoso-normal-v1-8-1\.cache\huggingface\download\controlnet\config.json.metadata" />
+    <Content Include="weights\yoso-normal-v1-8-1\.cache\huggingface\download\controlnet\controlnetvae.py.metadata" />
+    <Content Include="weights\yoso-normal-v1-8-1\.cache\huggingface\download\controlnet\diffusion_pytorch_model.fp16.safetensors.metadata" />
+    <Content Include="weights\yoso-normal-v1-8-1\.cache\huggingface\download\model_index.json.metadata" />
+    <Content Include="weights\yoso-normal-v1-8-1\.cache\huggingface\download\README.md.metadata" />
+    <Content Include="weights\yoso-normal-v1-8-1\.cache\huggingface\download\unet\config.json.metadata" />
+    <Content Include="weights\yoso-normal-v1-8-1\.cache\huggingface\download\unet\diffusion_pytorch_model.fp16.safetensors.metadata" />
+    <Content Include="weights\yoso-normal-v1-8-1\.cache\huggingface\download\vae\config.json.metadata" />
+    <Content Include="weights\yoso-normal-v1-8-1\.cache\huggingface\download\vae\diffusion_pytorch_model.fp16.safetensors.metadata" />
+    <Content Include="weights\yoso-normal-v1-8-1\.gitattributes" />
+    <Content Include="weights\yoso-normal-v1-8-1\controlnet\config.json" />
+    <Content Include="weights\yoso-normal-v1-8-1\controlnet\diffusion_pytorch_model.fp16.safetensors" />
+    <Content Include="weights\yoso-normal-v1-8-1\model_index.json" />
+    <Content Include="weights\yoso-normal-v1-8-1\README.md" />
+    <Content Include="weights\yoso-normal-v1-8-1\unet\config.json" />
+    <Content Include="weights\yoso-normal-v1-8-1\unet\diffusion_pytorch_model.fp16.safetensors" />
+    <Content Include="weights\yoso-normal-v1-8-1\vae\config.json" />
+    <Content Include="weights\yoso-normal-v1-8-1\vae\diffusion_pytorch_model.fp16.safetensors" />
+    <Content Include="whl\cumm_cu128-0.7.13-cp311-cp311-win_amd64.whl" />
+    <Content Include="whl\spconv_cu128-2.3.8-cp311-cp311-win_amd64.whl" />
+  </ItemGroup>
+  <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v$(VisualStudioVersion)\Python Tools\Microsoft.PythonTools.targets" />
+  <!-- Uncomment the CoreCompile target to enable the Build command in
+       Visual Studio and specify your pre- and post-build commands in
+       the BeforeBuild and AfterBuild targets below. -->
+  <!--<Target Name="CoreCompile" />-->
+  <Target Name="BeforeBuild">
+  </Target>
+  <Target Name="AfterBuild">
+  </Target>
+</Project>
