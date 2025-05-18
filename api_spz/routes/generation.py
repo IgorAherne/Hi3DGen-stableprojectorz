@@ -1,4 +1,3 @@
-
 import logging
 import time
 import traceback
@@ -156,36 +155,86 @@ async def _load_images_into_list( files: Optional[List[UploadFile]] = None,
 async def _run_pipeline_generate_3d(pil_input_image: Image.Image, arg: GenerationArgForm) -> Dict:
     """
     Generates a 3D mesh from a single PIL image using Hi3DGen.
-    Includes: image preprocessing, normal map generation, Hi3DGen pipeline execution, and Trimesh conversion.
+    Manages model movement between CPU and GPU for VRAM efficiency.
     """
     def worker():
+        # Get models from global state
+        hi3dgen_pipeline_cpu = state.pipeline
+        normal_predictor_cpu_wrapper = state.normal_predictor
+        # Determine target device for active processing (e.g., "cuda" or "cpu")
+        # state._device_preference should hold this (e.g., "cuda" if available, else "cpu")
+        active_processing_device = state._device_preference 
+        
+        if hi3dgen_pipeline_cpu is None or normal_predictor_cpu_wrapper is None:
+            raise RuntimeError("Models not initialized in state. Cannot generate.")
+
+        mesh_trimesh_output = None
+        
         try:
-            hi3dgen_pipeline = state.pipeline
-            normal_predictor = state.normal_predictor
-            
-            if torch.cuda.is_available():
+            # --- STAGE 1: Normal Prediction ---
+            logger.info(f"Normal Prediction: Preparing on device '{active_processing_device}'...")
+            # The normal_predictor_cpu_wrapper might have an internal 'model' (YOSONormalsPipeline)
+            actual_normal_predictor_module = None
+            if hasattr(normal_predictor_cpu_wrapper, 'model'): # This is typical for StableNormal_turbo
+                actual_normal_predictor_module = normal_predictor_cpu_wrapper.model
+            elif isinstance(normal_predictor_cpu_wrapper, torch.nn.Module): # Fallback if wrapper itself is the model
+                actual_normal_predictor_module = normal_predictor_cpu_wrapper
+            else:
+                raise TypeError("Normal predictor in state is not a recognized PyTorch module or wrapper.")
+
+            if actual_normal_predictor_module and hasattr(actual_normal_predictor_module, 'to'):
+                actual_normal_predictor_module.to(active_processing_device)
+                state._active_device = active_processing_device # Track current device
+                logger.debug(f"Normal predictor module moved to {active_processing_device}")
+
+            if torch.cuda.is_available() and active_processing_device == "cuda":
                 torch.cuda.empty_cache()
             
             seed_to_use = arg.seed
-            if seed_to_use == -1 or seed_to_use == 0: # app.py maps 0 to random
+            if seed_to_use == -1 or seed_to_use == 0:
                 seed_to_use = np.random.randint(1, np.iinfo(np.int32).max)
             
-            # 1. Preprocess input_pil_image for normal generation (BG removal, crop, pad, resize by Hi3DGen's method)
-            #    Input is RGBA for consistent alpha handling by hi3dgen_pipeline.preprocess_image
-            logger.info("Preprocessing input image for normal map generation...")
-            processed_for_normal = hi3dgen_pipeline.preprocess_image(pil_input_image.convert("RGBA"), resolution=1024)
+            logger.info("Preprocessing input image for normal map generation (on CPU)...")
+            # Preprocessing for normal map can often be done on CPU before moving normal predictor to GPU
+            # hi3dgen_pipeline_cpu is on CPU here.
+            processed_for_normal = hi3dgen_pipeline_cpu.preprocess_image(pil_input_image.convert("RGBA"), resolution=1024)
 
-            # 2. Generate Normal Map using external normal_predictor
             logger.info("Generating normal map...")
-            normal_image_pil = normal_predictor(processed_for_normal, resolution=768, match_input_resolution=True, data_type='object')
+            # The normal_predictor_cpu_wrapper is called; its internal model is now on active_processing_device
+            normal_image_pil = normal_predictor_cpu_wrapper(processed_for_normal, resolution=768, match_input_resolution=True, data_type='object')
+            logger.info("Normal map generated.")
 
-            # 3. Run Hi3DGen Pipeline with the generated normal map
+        finally:
+            # Move Normal Predictor back to CPU
+            if 'actual_normal_predictor_module' in locals() and actual_normal_predictor_module is not None:
+                if hasattr(actual_normal_predictor_module, 'cpu'):
+                    actual_normal_predictor_module.cpu()
+                    logger.debug("Normal predictor module moved back to CPU.")
+            state._active_device = "cpu" # Reset active device tracker
+            if torch.cuda.is_available() and active_processing_device == "cuda":
+                torch.cuda.empty_cache()
+            logger.info("Normal Prediction stage finished, model returned to CPU.")
+
+        if normal_image_pil is None: # Critical check
+            raise RuntimeError("Normal map generation failed.")
+
+        # --- STAGE 2: Hi3DGen Pipeline Execution ---
+        try:
+            logger.info(f"Hi3DGen Pipeline: Preparing on device '{active_processing_device}'...")
+            if hasattr(hi3dgen_pipeline_cpu, 'to'):
+                hi3dgen_pipeline_cpu.to(active_processing_device) # Move the main pipeline
+                state._active_device = active_processing_device
+                logger.debug(f"Hi3DGenPipeline moved to {active_processing_device}")
+            
+            if torch.cuda.is_available() and active_processing_device == "cuda":
+                torch.cuda.empty_cache()
+
             logger.info("Running Hi3DGen pipeline...")
-            pipeline_output_internal = hi3dgen_pipeline.run(
-                image=normal_image_pil, # This is the normal map
+            pipeline_output_internal = hi3dgen_pipeline_cpu.run( # Now hi3dgen_pipeline_cpu is on active_processing_device
+                image=normal_image_pil,
                 seed=seed_to_use,
-                formats=["mesh"], # We always want a mesh representation
-                preprocess_image=False, # Normal map is already prepared and preprocessed
+                formats=["mesh"],
+                preprocess_image=False,
                 sparse_structure_sampler_params={
                     "steps": arg.ss_sampling_steps,
                     "cfg_strength": arg.ss_guidance_strength,
@@ -195,29 +244,34 @@ async def _run_pipeline_generate_3d(pil_input_image: Image.Image, arg: Generatio
                     "cfg_strength": arg.slat_guidance_strength,
                 },
             )
-            
             internal_mesh_representation = pipeline_output_internal['mesh'][0]
             if internal_mesh_representation is None:
                 raise RuntimeError("Hi3DGen pipeline did not return a mesh representation.")
             
-            # 4. Convert Hi3DGen's internal mesh to Trimesh
             logger.info("Converting to Trimesh object...")
-            mesh_trimesh = internal_mesh_representation.to_trimesh(transform_pose=True)
-            
-            outputs = {
-                "mesh": [mesh_trimesh], # List to maintain consistency with previous structure
-                "original_image": pil_input_image # Original input image for potential future use (e.g. texturing)
-            }
-            return outputs
-            
-        except Exception as e:
-            logger.error(f"Error in Hi3DGen 3D generation worker: {str(e)}")
-            logger.error(traceback.format_exc())
-            raise e
+            mesh_trimesh_output = internal_mesh_representation.to_trimesh(transform_pose=True)
+            logger.info("Trimesh object created.")
+
         finally:
-            if torch.cuda.is_available():
+            # Move Hi3DGen Pipeline back to CPU
+            if hasattr(hi3dgen_pipeline_cpu, 'cpu'):
+                hi3dgen_pipeline_cpu.cpu()
+                logger.debug("Hi3DGenPipeline moved back to CPU.")
+            state._active_device = "cpu"
+            if torch.cuda.is_available() and active_processing_device == "cuda":
                 torch.cuda.empty_cache()
-    
+            logger.info("Hi3DGen Pipeline stage finished, model returned to CPU.")
+
+        if mesh_trimesh_output is None: # Critical check
+            raise RuntimeError("3D mesh generation failed.")
+            
+        outputs = {
+            "mesh": [mesh_trimesh_output],
+            "original_image": pil_input_image
+        }
+        return outputs
+            
+    # Run the synchronous worker function in a separate thread
     return await asyncio.to_thread(worker)
 
 

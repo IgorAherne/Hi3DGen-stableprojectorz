@@ -60,11 +60,22 @@ def cache_weights(weights_dir: str) -> dict:
     model_ids = [ # Renamed for brevity
         "Stable-X/trellis-normal-v0-1", "Stable-X/yoso-normal-v1-8-1", "ZhengPeng7/BiRefNet"
     ]
-        print(f"Downloading and caching model: {model_id}")
-        # Use snapshot_download to download the model
-        local_path = snapshot_download(repo_id=model_id, local_dir=os.path.join(weights_dir, model_id.split("/")[-1]), force_download=False)
-        cached_paths[model_id] = local_path
-        print(f"Cached at: {local_path}")
+    cached_paths = {} # Renamed for brevity
+
+    for repo_id in model_ids: # Renamed for clarity (Hugging Face term)
+        local_repo_root = Path(weights_dir) / f"models--{repo_id.replace('/', '--')}"
+        print(f"Processing {repo_id} into {local_repo_root}...")
+        sys.stdout.flush()
+        local_repo_root.mkdir(parents=True, exist_ok=True)
+
+        try:
+            # Get all file paths within the repository
+            files_in_repo = list_repo_files(repo_id=repo_id, repo_type="model")
+            num_total_files = len(files_in_repo)
+            print(f"  Found {num_total_files} files. Starting download/verification...")
+            sys.stdout.flush()
+
+            for i, filename_in_repo in enumerate(files_in_repo):
                 # Print progress before each file operation
                 print(f"  [{i+1}/{num_total_files}] Processing: {filename_in_repo}")
                 sys.stdout.flush()
@@ -72,7 +83,16 @@ def cache_weights(weights_dir: str) -> dict:
                     # hf_hub_download handles caching internally.
                     # It downloads to a shared HF cache then copies/symlinks to local_dir if specified.
                     # We specify local_dir to ensure files land directly in our target structure.
+                    hf_hub_download(
                         repo_id=repo_id,
+                        filename=filename_in_repo,
+                        repo_type="model",
+                        local_dir=str(local_repo_root), # Ensures download into the model's specific folder
+                        local_dir_use_symlinks=False, # Force copy, not symlink
+                        force_download=False, # Only downloads if not present or outdated in cache/local_dir
+                    )
+                except Exception as file_e:
+                    # Silently skip individual file errors (e.g., if it's a directory entry or unresolvable)
                     # More robust error handling would log this or retry. For compactness, we skip.
                     # print(f"    Warning: Skipping {filename_in_repo} due to: {str(file_e)[:50]}...") # Optional: short error
                     pass

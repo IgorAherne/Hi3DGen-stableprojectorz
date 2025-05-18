@@ -3,7 +3,7 @@ import torch
 from pathlib import Path
 import os
 from typing import Optional
-from hi3dgen.pipelines import Hi3DGenPipeline
+from hi3dgen.pipelines import Hi3DGenPipeline # Assuming this is the correct import path for your project structure
 
 logger = logging.getLogger("stable3dgen_api")
 
@@ -11,21 +11,34 @@ logger = logging.getLogger("stable3dgen_api")
 class Hi3DGenState:
     
     def __init__(self):
-        self.temp_dir = Path("temp")
+        self.temp_dir = Path("temp") # Make sure this path is correct relative to your execution
         self.temp_dir.mkdir(exist_ok=True)
         self.pipeline: Optional[Hi3DGenPipeline] = None
-        self.normal_predictor: Optional[torch.nn.Module] = None
-        self._device = "cpu"
+        self.normal_predictor: Optional[torch.nn.Module] = None # Keep as torch.nn.Module for flexibility
+        self._device_preference = "cpu" # Store user's device preference (cuda or cpu)
+        self._active_device = "cpu" # Actual device models are currently on (for dynamic moving)
 
 
     def cleanup(self):
         logger.info("Hi3DGenState cleanup: Releasing models.")
+        # Ensure models are on CPU before deleting to free GPU VRAM if they were moved
+        if self.pipeline and hasattr(self.pipeline, 'cpu'):
+            self.pipeline.cpu()
         del self.pipeline
         self.pipeline = None
+
+        if self.normal_predictor:
+            # The normal_predictor wrapper from torch.hub might have an internal 'model'
+            if hasattr(self.normal_predictor, 'model') and hasattr(self.normal_predictor.model, 'cpu'):
+                self.normal_predictor.model.cpu()
+            elif hasattr(self.normal_predictor, 'cpu'): # If the wrapper itself is an nn.Module
+                self.normal_predictor.cpu()
         del self.normal_predictor
         self.normal_predictor = None
+        
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
+        self._active_device = "cpu"
 
 
     def initialize_pipeline(self, 
@@ -33,72 +46,85 @@ class Hi3DGenState:
                            normal_predictor_repo: str, 
                            normal_predictor_model: str = "StableNormal_turbo",
                            yoso_version: str = "yoso-normal-v1-8-1",
-                           weights_cache_dir: str = "./weights",
+                           weights_cache_dir: str = "./weights", # Ensure this path is correct
                            device: Optional[str] = None):
         
-        self._device = device or ("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info(f"Initializing Hi3DGen state on device: {self._device}")
-        logger.info(f"Pipeline: '{model_path}', NormalPredictor: '{normal_predictor_repo}/{normal_predictor_model}'")
+        self._device_preference = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        # Models will be loaded to CPU first, then moved to _device_preference when used.
+        self._active_device = "cpu" # Initial load to CPU
+        
+        logger.info(f"Initializing Hi3DGen state. Preferred active device: {self._device_preference}. Initial load to CPU.")
+        logger.info(f"Pipeline path: '{model_path}', NormalPredictor: '{normal_predictor_repo}/{normal_predictor_model}'")
+        # Ensure weights_cache_dir exists, as torch.hub and from_pretrained might need it.
+        # This directory should ideally be handled by your app.py's cache_weights or similar setup.
+        Path(weights_cache_dir).mkdir(parents=True, exist_ok=True)
 
         try:
-            # 1. Load Hi3DGenPipeline
+            # 1. Load Hi3DGenPipeline to CPU
+            logger.info(f"Loading Hi3DGenPipeline from '{model_path}' to CPU...")
             self.pipeline = Hi3DGenPipeline.from_pretrained(model_path)
             if self.pipeline is None: 
                 raise RuntimeError(f"Hi3DGenPipeline.from_pretrained('{model_path}') returned None.")
             
-            self.pipeline.to(self._device)  # Moves all sub-models in self.pipeline.models
+            self.pipeline.cpu() # Explicitly move to CPU after loading
+            self._set_eval_mode(self.pipeline, "Hi3DGenPipeline")
+            logger.info("Hi3DGenPipeline loaded to CPU and configured.")
 
-            # Explicitly set all sub-models within the pipeline to eval mode
-            if hasattr(self.pipeline, 'models') and self.pipeline.models:
-                for model_name, model_instance in self.pipeline.models.items():
-                    if hasattr(model_instance, 'eval') and callable(model_instance.eval):
-                        model_instance.eval()
-                logger.info("All sub-models in Hi3DGenPipeline set to evaluation mode.")
-            else:
-                logger.warning("Hi3DGenPipeline.models not found or empty; could not set sub-models to eval mode explicitly.")
-            
-            logger.info("Hi3DGenPipeline loaded and configured.")
-
-            # 2. Load Normal Predictor (e.g., StableNormal_turbo)
+            # 2. Load Normal Predictor to CPU
             is_local_repo = Path(normal_predictor_repo).is_dir() and \
                             Path(normal_predictor_repo, "hubconf.py").exists()
-            
             hub_source_type = 'local' if is_local_repo else 'github'
-            repo_to_load = normal_predictor_repo
             
-            logger.info(f"Loading Normal Predictor via torch.hub (source: {hub_source_type}, repo: {repo_to_load}). Cache dir: {weights_cache_dir}")
+            logger.info(f"Loading Normal Predictor '{normal_predictor_model}' from '{normal_predictor_repo}' (source: {hub_source_type}) to CPU. Cache dir: {weights_cache_dir}")
+            
+            # torch.hub.load loads the model wrapper. The wrapper's __init__ might try to move its internal model to CUDA.
+            # We want to control this. For now, we load it and then immediately ensure its internal model is on CPU if possible.
             self.normal_predictor = torch.hub.load(
-                repo_or_dir=repo_to_load,
+                repo_or_dir=normal_predictor_repo,
                 model=normal_predictor_model,
                 source=hub_source_type,
                 trust_repo=True, 
                 yoso_version=yoso_version,
                 local_cache_dir=weights_cache_dir,
-                #pretrained=True  REMOVED THIS LINE based on app.py's fallback and the error
             )
             if self.normal_predictor is None: 
-                raise RuntimeError(f"torch.hub.load for '{normal_predictor_model}' from '{repo_to_load}' returned None.")
-            self.normal_predictor.to(self._device) 
-            
-            # Explicitly set all sub-models within the normal_predictor to eval mode
-            if hasattr(self.normal_predictor, 'models') and self.normal_predictor.models:
-                for model_name, model_instance in self.normal_predictor.models.items():
-                    if hasattr(model_instance, 'eval') and callable(model_instance.eval):
-                        model_instance.eval()
-                logger.info("All sub-models in normal_predictor set to evaluation mode.")
+                raise RuntimeError(f"torch.hub.load for '{normal_predictor_model}' from '{normal_predictor_repo}' returned None.")
 
-            logger.info("Normal Predictor loaded and configured.")
+            # Ensure the loaded normal_predictor (and its internal model) are on CPU
+            if hasattr(self.normal_predictor, 'model') and hasattr(self.normal_predictor.model, 'cpu'):
+                self.normal_predictor.model.cpu() # Target the internal YOSONormalsPipeline
+                self._set_eval_mode(self.normal_predictor.model, "NormalPredictor.model")
+            elif hasattr(self.normal_predictor, 'cpu'): # If the wrapper itself is an nn.Module
+                self.normal_predictor.cpu()
+                self._set_eval_mode(self.normal_predictor, "NormalPredictor (wrapper)")
 
-            logger.info("Hi3DGenState initialization successful.")
+            logger.info("Normal Predictor loaded to CPU and configured.")
+            logger.info("Hi3DGenState initialization successful. Models are on CPU.")
 
         except Exception as e:
             logger.error(f"Hi3DGenState initialization failed: {e}", exc_info=True)
-            if hasattr(self, 'pipeline') and self.pipeline is not None: del self.pipeline
-            self.pipeline = None
-            if hasattr(self, 'normal_predictor') and self.normal_predictor is not None: del self.normal_predictor
-            self.normal_predictor = None
-            if torch.cuda.is_available(): torch.cuda.empty_cache()
+            self.cleanup() # Use cleanup to release any partially loaded models
             raise
+
+
+    def _set_eval_mode(self, model_container, container_name: str):
+        """Helper to recursively set eval mode on PyTorch modules."""
+        if hasattr(model_container, 'eval') and callable(model_container.eval):
+            model_container.eval()
+            logger.debug(f"Set {container_name} to evaluation mode.")
+
+        # For Hi3DGenPipeline, which has a 'models' dict
+        if isinstance(model_container, Hi3DGenPipeline) and hasattr(model_container, 'models') and model_container.models:
+            for model_name, model_instance in model_container.models.items():
+                if hasattr(model_instance, 'eval') and callable(model_instance.eval):
+                    model_instance.eval()
+                    logger.debug(f"  Sub-model {model_name} in {container_name} set to eval mode.")
+        # For NormalPredictor, which might have an internal 'model' that is a pipeline
+        elif hasattr(model_container, 'model') and hasattr(model_container.model, 'modules'): # Check if internal model is nn.Module like
+             if hasattr(model_container.model, 'eval') and callable(model_container.model.eval):
+                model_container.model.eval()
+                logger.debug(f"  Internal model of {container_name} set to eval mode.")
+
 
 # Global state instance
 state = Hi3DGenState()
