@@ -4,8 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>b51df9cd-f880-42b3-bdd4-a728fd313418</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>
-    </StartupFile>
+    <StartupFile>api_spz\main_api.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
@@ -13,6 +12,10 @@
     <Name>Stable3DGen-stableprojectorz</Name>
     <RootNamespace>Stable3DGen-stableprojectorz</RootNamespace>
     <InterpreterId>Global|VisualStudio|venv</InterpreterId>
+    <IsWindowsApplication>False</IsWindowsApplication>
+    <LaunchProvider>Standard Python launcher</LaunchProvider>
+    <InterpreterPath>C:\_myDrive\repos\Stable3DGen-stableprojectorz\code\venv\Scripts\python.exe</InterpreterPath>
+    <EnableNativeCodeDebugging>False</EnableNativeCodeDebugging>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <DebugSymbols>true</DebugSymbols>
@@ -23,6 +26,8 @@
     <EnableUnmanagedDebugging>false</EnableUnmanagedDebugging>
   </PropertyGroup>
   <ItemGroup>
+    <InterpreterReference Include="Global|PythonCore|3.11" />
+    <InterpreterReference Include="Global|VisualStudio|Scripts" />
     <InterpreterReference Include="Global|VisualStudio|venv" />
   </ItemGroup>
   <ItemGroup>

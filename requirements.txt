@@ -1,6 +1,7 @@
 # For StableNormal
 diffusers>=0.28.0
 accelerate
+einops
 
 # For BirefNet
 kornia==0.8.0

@@ -3,3 +3,5 @@ venv\*
 .vs
 .vs\*
 /weights
+/venv
+/temp
