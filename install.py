@@ -181,7 +181,7 @@ def install_dependencies():
         packages_cuda128 = [
             ("pip install torch==2.7.0 torchvision==0.22.0 torchaudio==2.7.0 --index-url https://download.pytorch.org/whl/cu128", "Installing PyTorch 2.7.0 with CUDA 12.8"),
             ("pip install xformers==0.0.30 --index-url https://download.pytorch.org/whl/cu128", "Installing xformers - for torch 2.7.0 with CUDA 12.8"), #install AFTER the pytorch
-            ("pip install huggingface_hub", "Installing huggingface_hub"),
+            ("pip install huggingface_hub hf-transfer", "Installing huggingface_hub"),
             ("pip install -r requirements.txt", "Installing basic dependencies"), # install AFTER the pytorch
         ]
         

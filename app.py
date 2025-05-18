@@ -36,6 +36,7 @@ import numpy as np
 from hi3dgen.pipelines import Hi3DGenPipeline
 import trimesh
 import tempfile
+import hf_transfer
 
 MAX_SEED = np.iinfo(np.int32).max
 TMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tmp')
@@ -43,33 +44,48 @@ WEIGHTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'weights'
 os.makedirs(TMP_DIR, exist_ok=True)
 os.makedirs(WEIGHTS_DIR, exist_ok=True)
 
+# Initialize placeholders for models
+hi3dgen_pipeline = None
+normal_predictor = None
+
+
 def cache_weights(weights_dir: str) -> dict:
     import os
-    from huggingface_hub import snapshot_download
+    import sys
+    from huggingface_hub import list_repo_files, hf_hub_download
+    from pathlib import Path
 
-    os.makedirs(weights_dir, exist_ok=True)
-    model_ids = [
-        "Stable-X/trellis-normal-v0-1",
-        "Stable-X/yoso-normal-v1-8-1",
-        "ZhengPeng7/BiRefNet",
+    os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1" # Attempt to use hf-transfer
+
+    model_ids = [ # Renamed for brevity
+        "Stable-X/trellis-normal-v0-1", "Stable-X/yoso-normal-v1-8-1", "ZhengPeng7/BiRefNet"
     ]
-    cached_paths = {}
-    for model_id in model_ids:
-        print(f"Caching weights for: {model_id}")
-        # Check if the model is already cached
-        local_path = os.path.join(weights_dir, model_id.split("/")[-1])
-        if os.path.exists(local_path):
-            print(f"Already cached at: {local_path}")
-            cached_paths[model_id] = local_path
-            continue
-        # Download the model and cache it
         print(f"Downloading and caching model: {model_id}")
         # Use snapshot_download to download the model
         local_path = snapshot_download(repo_id=model_id, local_dir=os.path.join(weights_dir, model_id.split("/")[-1]), force_download=False)
         cached_paths[model_id] = local_path
         print(f"Cached at: {local_path}")
+                # Print progress before each file operation
+                print(f"  [{i+1}/{num_total_files}] Processing: {filename_in_repo}")
+                sys.stdout.flush()
+                try:
+                    # hf_hub_download handles caching internally.
+                    # It downloads to a shared HF cache then copies/symlinks to local_dir if specified.
+                    # We specify local_dir to ensure files land directly in our target structure.
+                        repo_id=repo_id,
+                    # More robust error handling would log this or retry. For compactness, we skip.
+                    # print(f"    Warning: Skipping {filename_in_repo} due to: {str(file_e)[:50]}...") # Optional: short error
+                    pass
+            
+            cached_paths[repo_id] = str(local_repo_root)
+            print(f"  Finished processing {repo_id}.")
+        except Exception as repo_e:
+            print(f"  ERROR processing repository {repo_id}: {repo_e}")
+        sys.stdout.flush()
 
     return cached_paths
+
+
 
 def preprocess_mesh(mesh_prompt):
     print("Processing mesh")
@@ -77,52 +93,102 @@ def preprocess_mesh(mesh_prompt):
     trimesh_mesh.export(mesh_prompt+'.glb')
     return mesh_prompt+'.glb'
 
+
 def preprocess_image(image):
-    if image is None:
-        return None
-    image = hi3dgen_pipeline.preprocess_image(image, resolution=1024)
-    return image
+    global hi3dgen_pipeline
+    if image is None: return None
+    # hi3dgen_pipeline is loaded on CPU at startup. Critical if None.
+    if hi3dgen_pipeline is None: 
+        raise RuntimeError("FATAL: Hi3DGenPipeline not loaded. Cannot preprocess.")
+    # .preprocess_image is expected to work with the pipeline on CPU
+    # and manage its own sub-component (e.g., BiRefNet) devices.
+    return hi3dgen_pipeline.preprocess_image(image, resolution=1024)
+
 
 def generate_3d(image, seed=-1,  
                 ss_guidance_strength=3, ss_sampling_steps=50,
                 slat_guidance_strength=3, slat_sampling_steps=6,):
-    if image is None:
+    global hi3dgen_pipeline, normal_predictor # Manage global model states
+
+    if image is None: return None, None, None
+    if seed == -1: seed = np.random.randint(0, MAX_SEED)
+    
+    if hi3dgen_pipeline is None:
+        raise RuntimeError("FATAL: Hi3DGenPipeline not loaded. Cannot generate 3D.")
+
+    normal_image_pil = None
+    mesh_path_output = None
+    
+    # --- STAGE 1: Normal Prediction ---
+    # Predictor class automatically moves its internal YOSONormalsPipeline to GPU if available during init.
+    try:
+        print("Normal Prediction: Loading model...") # It will auto-select GPU if available
+        # local_cache_dir ensures hub model CODE is sought/placed in WEIGHTS_DIR/hugoycj_StableNormal_main
+        # The Predictor internally calls from_pretrained for its model, using WEIGHTS_DIR as cache_dir for WEIGHTS.
+        normal_predictor = torch.hub.load(
+            "hugoycj/StableNormal", "StableNormal_turbo", trust_repo=True, 
+            yoso_version='yoso-normal-v1-8-1', local_cache_dir=WEIGHTS_DIR
+        )
+        # NO explicit .cuda() call on normal_predictor (the wrapper object)
+        
+        print("Normal Prediction: Generating normal map...")
+        normal_image_pil = normal_predictor(image, resolution=768, match_input_resolution=True, data_type='object')
+    except Exception as e:
+        print(f"ERROR in Normal Prediction stage: {e}")
+        # Ensure normal_predictor is cleaned up even if prediction fails after loading
+        if normal_predictor is not None:
+            print("Normal Prediction: Unloading model (due to error)...")
+            if hasattr(normal_predictor, 'model') and hasattr(normal_predictor.model, 'cpu'):
+                normal_predictor.model.cpu() # Move internal model to CPU
+            del normal_predictor; normal_predictor = None 
+            if torch.cuda.is_available(): torch.cuda.empty_cache()
+        return None, None, None # Abort if normal prediction fails
+    finally:
+        # This block executes if try was successful (normal_image_pil is not None)
+        # or if an exception occurred *not* handled by the inner except block above (less likely here).
+        # If normal_image_pil is None here, it means an error happened and was handled, so we skip further cleanup.
+        if normal_image_pil is not None and normal_predictor is not None:
+            print("Normal Prediction: Unloading model...")
+            if hasattr(normal_predictor, 'model') and hasattr(normal_predictor.model, 'cpu'):
+                normal_predictor.model.cpu() # Move internal model to CPU
+            del normal_predictor; normal_predictor = None 
+            if torch.cuda.is_available(): torch.cuda.empty_cache()
+
+    if normal_image_pil is None: # Check again, just in case (e.g. if finally didn't run as expected)
+        print("ERROR: Normal map not generated. Aborting 3D generation.")
         return None, None, None
 
-    if seed == -1:
-        seed = np.random.randint(0, MAX_SEED)
-    
-    image = hi3dgen_pipeline.preprocess_image(image, resolution=1024)
-    normal_image = normal_predictor(image, resolution=768, match_input_resolution=True, data_type='object')
+    # --- STAGE 2: 3D Generation ---
+    # Moves hi3dgen_pipeline (on CPU) to GPU, uses it, then moves back to CPU.
+    pipeline_on_gpu = False
+    try:
+        if torch.cuda.is_available():
+            print("3D Generation: Moving pipeline to GPU...")
+            hi3dgen_pipeline.cuda(); pipeline_on_gpu = True
+        
+        print("3D Generation: Running pipeline...")
+        outputs = hi3dgen_pipeline.run(
+            normal_image_pil, seed=seed, formats=["mesh",], preprocess_image=False,
+            sparse_structure_sampler_params={"steps": ss_sampling_steps, "cfg_strength": ss_guidance_strength},
+            slat_sampler_params={"steps": slat_sampling_steps, "cfg_strength": slat_guidance_strength},
+        )
+        
+        import datetime 
+        mesh_path_output = f"{TMP_DIR}/{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}/mesh.glb"
+        os.makedirs(os.path.dirname(mesh_path_output), exist_ok=True)
+        outputs['mesh'][0].to_trimesh(transform_pose=True).export(mesh_path_output)
+        print(f"SUCCESS: Mesh exported to {mesh_path_output}")
 
-    outputs = hi3dgen_pipeline.run(
-        normal_image,
-        seed=seed,
-        formats=["mesh",],
-        preprocess_image=False,
-        sparse_structure_sampler_params={
-            "steps": ss_sampling_steps,
-            "cfg_strength": ss_guidance_strength,
-        },
-        slat_sampler_params={
-            "steps": slat_sampling_steps,
-            "cfg_strength": slat_guidance_strength,
-        },
-    )
-    generated_mesh = outputs['mesh'][0]
-    
-    # Save outputs
-    import datetime
-    output_id = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
-    os.makedirs(os.path.join(TMP_DIR, output_id), exist_ok=True)
-    mesh_path = f"{TMP_DIR}/{output_id}/mesh.glb"
-    
-    # Export mesh
-    trimesh_mesh = generated_mesh.to_trimesh(transform_pose=True)
+    except Exception as e:
+        print(f"ERROR in 3D Generation stage: {e}")
+    finally:
+        if pipeline_on_gpu: 
+            print("3D Generation: Moving pipeline to CPU...")
+            hi3dgen_pipeline.cpu()
+            if torch.cuda.is_available(): torch.cuda.empty_cache()
+            
+    return normal_image_pil, mesh_path_output, mesh_path_output
 
-    trimesh_mesh.export(mesh_path)
-
-    return normal_image, mesh_path, mesh_path
 
 def convert_mesh(mesh_path, export_format):
     """Download the mesh in the selected format."""
@@ -267,20 +333,13 @@ if __name__ == "__main__":
     # Download and cache the weights
     cache_weights(WEIGHTS_DIR)
 
+    print("Loading Hi3DGenPipeline to CPU...")
     hi3dgen_pipeline = Hi3DGenPipeline.from_pretrained("weights/trellis-normal-v0-1")
-    hi3dgen_pipeline.cuda()
+    hi3dgen_pipeline.cpu() # Move to CPU after loading
+    print("Hi3DGenPipeline loaded on CPU.")
 
-    # Initialize normal predictor
-    try:
-        normal_predictor = torch.hub.load(
-            os.path.join(torch.hub.get_dir(), 'hugoycj_StableNormal_main'), 
-            "StableNormal_turbo", 
-            yoso_version='yoso-normal-v1-8-1', 
-            source='local', 
-            local_cache_dir='./weights' ) #removed the pretrained=True, was causing exception
-    except Exception as e:
-        normal_predictor = torch.hub.load("hugoycj/StableNormal", "StableNormal_turbo", trust_repo=True, yoso_version='yoso-normal-v1-8-1', local_cache_dir='./weights')    
-
+    # normal_predictor will be loaded on demand in generate_3d function
+    
     # Launch the app
     demo.launch(share=False, server_name="127.0.0.1")
 
