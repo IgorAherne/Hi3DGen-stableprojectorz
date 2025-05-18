@@ -31,12 +31,16 @@ import gradio as gr
 import os
 os.environ['SPCONV_ALGO'] = 'native'
 from typing import *
+import traceback
+import datetime
+import shutil
 import torch
 import numpy as np
 from hi3dgen.pipelines import Hi3DGenPipeline
-import trimesh
 import tempfile
 import hf_transfer
+import trimesh
+import xatlas
 
 MAX_SEED = np.iinfo(np.int32).max
 TMP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tmp')
@@ -125,105 +129,237 @@ def preprocess_image(image):
     return hi3dgen_pipeline.preprocess_image(image, resolution=1024)
 
 
+
+
+def unwrap_mesh_with_xatlas(input_mesh: trimesh.Trimesh) -> trimesh.Trimesh:
+    """
+    Unwraps a Trimesh object using xatlas and returns a new Trimesh object
+    with generated UVs.
+    """
+    print("UV Unwrapping with xatlas: Starting process...")
+
+    input_vertices_orig = input_mesh.vertices.astype(np.float32) 
+    input_faces_orig = input_mesh.faces.astype(np.uint32)      
+    vertex_normals_from_trimesh = input_mesh.vertex_normals 
+    input_normals_orig = np.ascontiguousarray(vertex_normals_from_trimesh, dtype=np.float32)
+
+    print(f"  Input mesh: {input_vertices_orig.shape[0]} vertices, {input_faces_orig.shape[0]} faces.")
+
+    atlas = xatlas.Atlas()
+    atlas.add_mesh(input_vertices_orig, input_faces_orig, input_normals_orig) 
+
+    # Configure xatlas ChartOptions
+    chart_options = xatlas.ChartOptions()
+    
+    # Allow more stretch/distortion within a chart. Default is 2.0.
+    chart_options.max_cost = 8.0 # keep it high.
+    
+    # Reduce the penalty for creating seams along edges with differing normals.
+    # Default is 4.0. Lower values make xatlas less likely to cut based on normal changes.
+    chart_options.normal_seam_weight = 1.0 # Significantly reduced from default 4.0
+    
+    # chart_options.straightness_weight = 3.0 # Default 6.0; lower might allow less straight chart boundaries.
+    # chart_options.roundness_weight = 0.005 # Default 0.01
+
+    # Configure xatlas PackOptions
+    pack_options = xatlas.PackOptions()
+    pack_options.resolution = 1024 
+    pack_options.padding = 2       
+
+    print(f"  Running xatlas.generate() with ChartOptions(max_cost={chart_options.max_cost:.2f}, normal_seam_weight={chart_options.normal_seam_weight:.2f}) and PackOptions(resolution={pack_options.resolution}, padding={pack_options.padding})...")
+    atlas.generate(chart_options=chart_options, pack_options=pack_options) 
+    print(f"  xatlas generated atlas with dimensions: width={atlas.width}, height={atlas.height}")
+    
+    # --- xatlas output processing ---
+    # Important Note on xatlas-python's get_mesh() behavior for meshes added via add_mesh():
+    # The first returned array (v_out_xref_data) is NOT new spatial vertex coordinates.
+    # It's an array of 'cross-reference' indices (uint32) pointing to the ORIGINAL input vertices.
+    # For each new vertex created by xatlas due to UV seam splitting, this xref tells us
+    # which original vertex its spatial position should be copied from.
+    v_out_xref_data, f_out_indices, uv_coords_from_xatlas = atlas.get_mesh(0)
+    
+    num_new_vertices = uv_coords_from_xatlas.shape[0]
+    if v_out_xref_data.shape == (num_new_vertices,): 
+        xref_indices = v_out_xref_data.astype(np.uint32) 
+        if np.any(xref_indices >= input_vertices_orig.shape[0]) or np.any(xref_indices < 0):
+             raise ValueError("Invalid xref values from xatlas - out of bounds for original input vertices.")
+        final_vertices_spatial = input_vertices_orig[xref_indices]
+    elif v_out_xref_data.shape == (num_new_vertices, 3): 
+        print("  Warning: xatlas.get_mesh() returned 3D vertex data directly, which is unexpected for add_mesh workflow.")
+        final_vertices_spatial = v_out_xref_data.astype(np.float32)
+    else:
+        raise ValueError(f"Unexpected shape for vertex/xref data from xatlas.get_mesh: {v_out_xref_data.shape}.")
+
+    # --- UV Handling (remains the same as before) ---
+    final_uvs = uv_coords_from_xatlas.astype(np.float32)
+    if np.any(final_uvs > 1.5): 
+        print("  UVs appear to be in pixel coordinates. Normalizing...")
+        if atlas.width > 0 and atlas.height > 0: 
+            final_uvs /= np.array([atlas.width, atlas.height], dtype=np.float32)
+        else:
+            print("  WARNING: Atlas width/height is 0, cannot normalize pixel UVs. Using unnormalized.")
+    else:
+        min_uv = final_uvs.min(axis=0) if final_uvs.size > 0 else "N/A"
+        max_uv = final_uvs.max(axis=0) if final_uvs.size > 0 else "N/A"
+        print(f"  UVs appear to be normalized. Min: {min_uv}, Max: {max_uv}")
+    
+    output_mesh = trimesh.Trimesh(vertices=final_vertices_spatial, faces=f_out_indices, process=False) 
+    
+    if final_uvs.shape != (final_vertices_spatial.shape[0], 2):
+        raise ValueError(f"Shape mismatch for final UVs before Trimesh assignment.")
+
+    material = trimesh.visual.material.PBRMaterial(name='defaultXatlasMat')
+    output_mesh.visual = trimesh.visual.TextureVisuals(uv=final_uvs, material=material)
+    
+    if hasattr(output_mesh.visual, 'uv') and output_mesh.visual.uv is not None:
+        print(f"  Trimesh object successfully created with UVs, Shape: {output_mesh.visual.uv.shape}")
+    else:
+        print("  ERROR: Trimesh object does NOT have UVs assigned after TextureVisuals call.")
+        raise RuntimeError("Failed to assign UVs to the Trimesh object.")
+
+    print("UV Unwrapping with xatlas: Process complete.")
+    return output_mesh
+
+
+
 def generate_3d(image, seed=-1,  
                 ss_guidance_strength=3, ss_sampling_steps=50,
                 slat_guidance_strength=3, slat_sampling_steps=6,):
-    global hi3dgen_pipeline, normal_predictor # Manage global model states
+    # global hi3dgen_pipeline # normal_predictor is now function-local
 
-    if image is None: return None, None, None
+    if image is None: 
+        print("Input image is None. Aborting generation.")
+        return None, None, None 
     if seed == -1: seed = np.random.randint(0, MAX_SEED)
     
-    if hi3dgen_pipeline is None:
-        raise RuntimeError("FATAL: Hi3DGenPipeline not loaded. Cannot generate 3D.")
+    if hi3dgen_pipeline is None: # hi3dgen_pipeline is still global and loaded at startup
+        print("FATAL: Hi3DGenPipeline not loaded. Cannot generate 3D.")
+        return None, None, None 
 
     normal_image_pil = None
-    mesh_path_output = None
+    gradio_model_path = None 
     
     # --- STAGE 1: Normal Prediction ---
-    # Predictor class automatically moves its internal YOSONormalsPipeline to GPU if available during init.
+    current_normal_predictor_instance = None 
     try:
-        print("Normal Prediction: Loading model...") # It will auto-select GPU if available
-        # local_cache_dir ensures hub model CODE is sought/placed in WEIGHTS_DIR/hugoycj_StableNormal_main
-        # The Predictor internally calls from_pretrained for its model, using WEIGHTS_DIR as cache_dir for WEIGHTS.
-        normal_predictor = torch.hub.load(
+        print("Normal Prediction: Loading model...") 
+        current_normal_predictor_instance = torch.hub.load(
             "hugoycj/StableNormal", "StableNormal_turbo", trust_repo=True, 
             yoso_version='yoso-normal-v1-8-1', local_cache_dir=WEIGHTS_DIR
         )
-        # NO explicit .cuda() call on normal_predictor (the wrapper object)
-        
         print("Normal Prediction: Generating normal map...")
-        normal_image_pil = normal_predictor(image, resolution=768, match_input_resolution=True, data_type='object')
+        normal_image_pil = current_normal_predictor_instance(image, resolution=768, match_input_resolution=True, data_type='object')
     except Exception as e:
         print(f"ERROR in Normal Prediction stage: {e}")
-        # Ensure normal_predictor is cleaned up even if prediction fails after loading
-        if normal_predictor is not None:
-            print("Normal Prediction: Unloading model (due to error)...")
-            if hasattr(normal_predictor, 'model') and hasattr(normal_predictor.model, 'cpu'):
-                normal_predictor.model.cpu() # Move internal model to CPU
-            del normal_predictor; normal_predictor = None 
-            if torch.cuda.is_available(): torch.cuda.empty_cache()
-        return None, None, None # Abort if normal prediction fails
+        traceback.print_exc()
     finally:
-        # This block executes if try was successful (normal_image_pil is not None)
-        # or if an exception occurred *not* handled by the inner except block above (less likely here).
-        # If normal_image_pil is None here, it means an error happened and was handled, so we skip further cleanup.
-        if normal_image_pil is not None and normal_predictor is not None:
+        if current_normal_predictor_instance is not None: 
             print("Normal Prediction: Unloading model...")
-            if hasattr(normal_predictor, 'model') and hasattr(normal_predictor.model, 'cpu'):
-                normal_predictor.model.cpu() # Move internal model to CPU
-            del normal_predictor; normal_predictor = None 
+            if hasattr(current_normal_predictor_instance, 'model') and hasattr(current_normal_predictor_instance.model, 'cpu'):
+                current_normal_predictor_instance.model.cpu() 
+            del current_normal_predictor_instance 
             if torch.cuda.is_available(): torch.cuda.empty_cache()
 
-    if normal_image_pil is None: # Check again, just in case (e.g. if finally didn't run as expected)
-        print("ERROR: Normal map not generated. Aborting 3D generation.")
+    if normal_image_pil is None: 
+        print("ERROR: Normal map not generated after Stage 1. Aborting 3D generation.")
         return None, None, None
 
-    # --- STAGE 2: 3D Generation ---
-    # Moves hi3dgen_pipeline (on CPU) to GPU, uses it, then moves back to CPU.
+    # --- STAGE 2: 3D Generation & UV Unwrapping ---
     pipeline_on_gpu = False
     try:
         if torch.cuda.is_available():
-            print("3D Generation: Moving pipeline to GPU...")
+            print("3D Generation: Moving Hi3DGen pipeline to GPU...")
             hi3dgen_pipeline.cuda(); pipeline_on_gpu = True
         
-        print("3D Generation: Running pipeline...")
+        print("3D Generation: Running Hi3DGen pipeline...")
         outputs = hi3dgen_pipeline.run(
             normal_image_pil, seed=seed, formats=["mesh",], preprocess_image=False,
             sparse_structure_sampler_params={"steps": ss_sampling_steps, "cfg_strength": ss_guidance_strength},
             slat_sampler_params={"steps": slat_sampling_steps, "cfg_strength": slat_guidance_strength},
         )
         
-        import datetime 
-        mesh_path_output = f"{TMP_DIR}/{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}/mesh.glb"
-        os.makedirs(os.path.dirname(mesh_path_output), exist_ok=True)
-        outputs['mesh'][0].to_trimesh(transform_pose=True).export(mesh_path_output)
-        print(f"SUCCESS: Mesh exported to {mesh_path_output}")
+        timestamp = datetime.datetime.now().strftime('%Y%m%d%H%M%S')
+        output_dir = os.path.join(TMP_DIR, timestamp)
+        os.makedirs(output_dir, exist_ok=True)
+        
+        mesh_path_glb = os.path.join(output_dir, "mesh.glb")
+
+        raw_mesh_trimesh = outputs['mesh'][0].to_trimesh(transform_pose=True)
+        
+        # Call the new UV unwrapping function
+        unwrapped_mesh_trimesh = unwrap_mesh_with_xatlas(raw_mesh_trimesh)
+        
+        # Export GLB
+        # Trimesh is expected to include UVs in GLB by default if they are present in mesh.visual.uv.
+        print(f"Exporting GLB to {mesh_path_glb}...")
+        unwrapped_mesh_trimesh.export(mesh_path_glb) 
+        print(f"SUCCESS: GLB exported.")
+
+        gradio_model_path = mesh_path_glb 
 
     except Exception as e:
-        print(f"ERROR in 3D Generation stage: {e}")
+        print(f"ERROR in 3D Generation or UV Unwrapping stage: {e}")
+        traceback.print_exc() 
+        gradio_model_path = None 
     finally:
         if pipeline_on_gpu: 
-            print("3D Generation: Moving pipeline to CPU...")
-            hi3dgen_pipeline.cpu()
+            print("3D Generation: Moving Hi3DGen pipeline to CPU...")
+            hi3dgen_pipeline.cpu() 
             if torch.cuda.is_available(): torch.cuda.empty_cache()
             
-    return normal_image_pil, mesh_path_output, mesh_path_output
+    return normal_image_pil, gradio_model_path, gradio_model_path
 
 
-def convert_mesh(mesh_path, export_format):
-    """Download the mesh in the selected format."""
-    if not mesh_path:
+
+def convert_mesh(mesh_path: str, export_format: str) -> Optional[str]:
+    """
+    Converts mesh at mesh_path to export_format. Returns path to new temp file.
+    If export_format is GLB and input is GLB, copies input to a new temp file.
+    """
+    if not mesh_path or not os.path.exists(mesh_path):
+        print(f"convert_mesh: Invalid input mesh_path: {mesh_path}")
         return None
-    
-    # Create a temporary file to store the mesh data
-    temp_file = tempfile.NamedTemporaryFile(suffix=f".{export_format}", delete=False)
-    temp_file_path = temp_file.name
-    
-    new_mesh_path = mesh_path.replace(".glb", f".{export_format}")
-    mesh = trimesh.load_mesh(mesh_path)
-    mesh.export(temp_file_path)  # Export to the temporary file
-    
-    return temp_file_path # Return the path to the temporary file
+
+    temp_file_path = None # Define outside try for cleanup
+    try:
+        # Use trimesh's util for a NamedTemporaryFile context manager
+        with trimesh.util.NamedTemporaryFile(suffix=f".{export_format.lower()}", delete=False) as tmp_out_file_obj:
+            temp_file_path = tmp_out_file_obj.name
+
+        # If GLB to GLB, copy original to preserve UVs perfectly, avoiding re-export issues.
+        if export_format.lower() == "glb" and mesh_path.lower().endswith(".glb"):
+            print(f"convert_mesh: Copying GLB {mesh_path} to {temp_file_path}")
+            shutil.copy2(mesh_path, temp_file_path)
+            return temp_file_path
+
+        # For other conversions, or if GLB-to-GLB copy failed (not handled here, would need more logic)
+        print(f"convert_mesh: Converting {mesh_path} to {export_format} at {temp_file_path}")
+        mesh = trimesh.load_mesh(mesh_path)
+        
+        # Brief check if loaded mesh has UVs, important for debugging conversion issues.
+        if not (hasattr(mesh.visual, 'uv') and mesh.visual.uv is not None):
+            print(f"  Warning: Loaded mesh from {mesh_path} has no UVs before export to {export_format}.")
+        
+        mesh.export(temp_file_path, file_type=export_format.lower())
+        
+        # Optional: Sanity check for GLB re-export if it didn't use the copy path.
+        # if export_format.lower() == "glb":
+        #     reloaded_mesh = trimesh.load_mesh(temp_file_path)
+        #     if not (hasattr(reloaded_mesh.visual, 'uv') and reloaded_mesh.visual.uv is not None):
+        #         print(f"  CRITICAL WARNING: Re-exported GLB {temp_file_path} lost UVs.")
+        return temp_file_path
+
+    except Exception as e:
+        print(f"convert_mesh: Error during conversion of '{mesh_path}' to '{export_format}': {e}")
+        traceback.print_exc()
+        if temp_file_path and os.path.exists(temp_file_path): # Cleanup temp file on error
+            try:
+                os.remove(temp_file_path)
+            except Exception as rm_e:
+                print(f"convert_mesh: Error removing temp file {temp_file_path}: {rm_e}")
+        return None
+
+
 
 # Create the Gradio interface with improved layout
 with gr.Blocks(css="footer {visibility: hidden}") as demo:
@@ -315,20 +451,30 @@ with gr.Blocks(css="footer {visibility: hidden}") as demo:
     )
     
     
-    def update_download_button(mesh_path, export_format):
-        if not mesh_path:
-            return gr.File.update(value=None, interactive=False)
-        
-        download_path = convert_mesh(mesh_path, export_format)
-        return download_path
+    def update_download_button(mesh_path_from_model_output: str, selected_format: str):
+        """
+        Callback for Gradio DownloadButton.
+        Converts the primary output mesh (GLB) to the selected_format if necessary.
+        """
+        if not mesh_path_from_model_output:
+            # Update the button to be non-interactive if there's no mesh path
+            return gr.DownloadButton.update(interactive=False) 
+    
+        path_for_download = convert_mesh(mesh_path_from_model_output, selected_format)
+    
+        if path_for_download:
+            print(f"update_download_button: Providing {path_for_download} for download as {selected_format}.")
+            # Set the 'value' of the DownloadButton to the path of the file to be downloaded
+            return gr.DownloadButton.update(value=path_for_download, interactive=True)
+        else:
+            print(f"update_download_button: Conversion failed for {selected_format}, button inactive.")
+            return gr.DownloadButton.update(interactive=False)
+
     
     export_format.change(
         update_download_button,
         inputs=[model_output, export_format],
         outputs=[download_btn]
-    ).then(
-        lambda: gr.Button(interactive=True),
-        outputs=[download_btn],
     )
     
     examples = gr.Examples(

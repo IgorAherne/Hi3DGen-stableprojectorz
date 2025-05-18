@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from PIL import Image
 import torch
 import trimesh
+import xatlas
 
 from api_spz.core.exceptions import CancelledException
 from api_spz.core.files_manage import file_manager
@@ -283,61 +284,138 @@ def normalize_meshSimplify_ratio(ratio: float) -> float:
     return ratio
 
 
+
 async def _run_pipeline_generate_glb(
     outputs: Dict,             # Expected to contain 'mesh': [trimesh_object]
-    mesh_simplify_ratio: float, # Received from args, but not used in this simplified version
-    texture_size: int,           # Received from args, but not used
-    apply_texture: bool = False, # Received from args, but not used
-    output_format: str = "glb"
+    mesh_simplify_ratio: float, # Received from args, effectively not used here for simplification
+    texture_size: int,          # Used as pack_options.resolution for xatlas
+    apply_texture: bool = False,# Placeholder, not used by Hi3DGen core
+    output_format: str = "glb",
 ):
     """
     Generate final 3D model file (GLB, OBJ, etc.) from Trimesh object.
-    This version matches app.py: no simplification or advanced cleaning from Hi3DGen output.
-    Texturing is also not part of Hi3DGen's core pipeline.
+    Also unwraps UVs using xatlas.
     """
-    if mesh_simplify_ratio < 100.0 and mesh_simplify_ratio > 0.0: # Check if it's not 1.0 or 100%
-         logger.info(f"Mesh simplification ratio is {mesh_simplify_ratio}, but simplification is not applied in this flow to match hi3dgen's app.py.")
+    # Note: mesh_simplify_ratio is passed but not used for simplification in this flow
+    # to match Hi3DGen's app.py behavior (no simplification after main pipeline).
+    # If simplification were desired, it would be applied to the 'mesh' object here.
+    if mesh_simplify_ratio < 100.0 and mesh_simplify_ratio > 0.0:
+         logger.info(f"Mesh simplification ratio is {mesh_simplify_ratio}, but simplification is not applied in this Hi3DGen API flow.")
 
-    def worker():
+    def worker(): # This synchronous function will be run in a thread
         try:
             start_time = time.time()
             
-            if torch.cuda.is_available(): # Good practice
+            if torch.cuda.is_available(): # Good practice before/after GPU-intensive ops
                 torch.cuda.empty_cache()
             
-            mesh: trimesh.Trimesh = outputs["mesh"][0] # Expecting a Trimesh object
-            # original_image = outputs.get("original_image") # PIL Image, for potential texturing
+            mesh_to_export: trimesh.Trimesh = outputs["mesh"][0] # Start with the raw mesh
 
-            if not isinstance(mesh, trimesh.Trimesh):
-                logger.error(f"Expected a trimesh.Trimesh object in outputs['mesh'][0], but got {type(mesh)}")
-                raise ValueError("Invalid mesh object provided for GLB generation.")
+            if not isinstance(mesh_to_export, trimesh.Trimesh):
+                logger.error(f"Expected a trimesh.Trimesh object, but got {type(mesh_to_export)}")
+                raise ValueError("Invalid mesh object provided for final model generation.")
 
-            logger.info(f"Received mesh for export with {len(mesh.faces)} faces and {len(mesh.vertices)} vertices.")
+            logger.info(f"Received mesh for export with {len(mesh_to_export.faces)} faces and {len(mesh_to_export.vertices)} vertices.")
 
-            # Texturing: Hi3DGen does not provide an integrated texturing pipeline in app.py.
+            if not apply_texture or output_format.lower() == "stl": # STL doesn't support UVs
+                logger.info("Skipping xatlas UV unwrapping / texturing.")
+            else:
+                logger.info("Performing UV unwrapping with xatlas...")
+                xatlas_start_time = time.time()
+                
+                # Prepare input data for xatlas
+                input_vertices_orig = mesh_to_export.vertices.astype(np.float32)
+                input_faces_orig = mesh_to_export.faces.astype(np.uint32)
+                # Ensure normals are available for xatlas
+                _ = mesh_to_export.vertex_normals # Access to compute if not present
+                input_normals_orig = np.ascontiguousarray(mesh_to_export.vertex_normals, dtype=np.float32)
+
+                atlas = xatlas.Atlas()
+                atlas.add_mesh(input_vertices_orig, input_faces_orig, input_normals_orig)
+                
+                # Configure xatlas ChartOptions for potentially larger UV islands
+                chart_options = xatlas.ChartOptions()
+                chart_options.max_cost = 8.0  # Allows more distortion for fewer charts
+                chart_options.normal_seam_weight = 1.0 # Less penalty for normal seams
+
+                # Configure xatlas PackOptions
+                pack_options = xatlas.PackOptions()
+                # Use texture_size from args as the target resolution for xatlas packing.
+                # This influences the scale of the UV charts in the atlas.
+                pack_options.resolution = texture_size 
+                pack_options.padding = 2 # Padding in texels between charts
+                
+                logger.info(f"  Running xatlas.generate() with ChartOptions(max_cost={chart_options.max_cost:.1f}, norm_seam_w={chart_options.normal_seam_weight:.1f}), PackOptions(resolution={pack_options.resolution}, pad={pack_options.padding})")
+                atlas.generate(chart_options=chart_options, pack_options=pack_options)
+                logger.info(f"  xatlas generated atlas with dimensions: width={atlas.width}, height={atlas.height}")
+                
+                v_out_xref_data, f_out_indices, uv_coords_from_xatlas = atlas.get_mesh(0)
+                
+                num_new_vertices = uv_coords_from_xatlas.shape[0]
+                if v_out_xref_data.shape == (num_new_vertices,): 
+                    xref_indices = v_out_xref_data.astype(np.uint32) 
+                    if np.any(xref_indices >= input_vertices_orig.shape[0]) or np.any(xref_indices < 0):
+                         raise ValueError("xatlas xref out of bounds for original input vertices.")
+                    final_vertices_spatial = input_vertices_orig[xref_indices]
+                elif v_out_xref_data.shape == (num_new_vertices, 3): 
+                    logger.warning("  xatlas.get_mesh() returned 3D vertex data directly (unexpected for add_mesh).")
+                    final_vertices_spatial = v_out_xref_data.astype(np.float32)
+                else:
+                    raise ValueError(f"Unexpected shape for vertex/xref data from xatlas.get_mesh: {v_out_xref_data.shape}.")
+
+                final_uvs = uv_coords_from_xatlas.astype(np.float32)
+                if np.any(final_uvs > 1.5): # Heuristic for pixel-space UVs
+                    logger.info("  UVs from xatlas appear to be in pixel coordinates. Normalizing...")
+                    if atlas.width > 0 and atlas.height > 0: 
+                        final_uvs /= np.array([atlas.width, atlas.height], dtype=np.float32)
+                    else:
+                        logger.warning("  Atlas width/height is 0, cannot normalize pixel UVs. Using unnormalized.")
+                else:
+                    logger.info(f"  UVs from xatlas appear to be normalized. Min: {final_uvs.min(axis=0) if final_uvs.size > 0 else 'N/A'}, Max: {final_uvs.max(axis=0) if final_uvs.size > 0 else 'N/A'}")
+                
+                # Create new Trimesh object with unwrapped data
+                mesh_to_export = trimesh.Trimesh(vertices=final_vertices_spatial, faces=f_out_indices, process=False)
+                
+                if final_uvs.shape[0] != final_vertices_spatial.shape[0] or final_uvs.ndim != 2 or final_uvs.shape[1] != 2 :
+                    raise ValueError(f"UV shape mismatch before assignment. Expected ({final_vertices_spatial.shape[0]}, 2), got {final_uvs.shape}.")
+                
+                material = trimesh.visual.material.PBRMaterial(name='defaultXatlasMat') # Use a simple default
+                mesh_to_export.visual = trimesh.visual.TextureVisuals(uv=final_uvs, material=material)
+                
+                if not (hasattr(mesh_to_export.visual, 'uv') and mesh_to_export.visual.uv is not None):
+                    raise RuntimeError("Failed to assign UVs to the Trimesh object after xatlas.")
+                
+                logger.info(f"xatlas UV unwrapping complete in {time.time() - xatlas_start_time:.2f}s. New mesh: {len(mesh_to_export.faces)} faces, {len(mesh_to_export.vertices)} vertices.")
+
+
+            # Texturing: Hi3DGen does not provide an integrated texturing pipeline.
             if apply_texture:
-                logger.warning("apply_texture is True, but Hi3DGen pipeline shown in app.py does not have integrated texturing. This option will be ignored for model export unless a separate texturing module is implemented and called here.")
-            # No texturing logic from state.texture_pipeline is called here.
-
+                logger.warning("apply_texture is True, but Hi3DGen pipeline does not have integrated texturing. This option will be ignored for model export unless a separate texturing module is implemented and called here.")
+            
             # Export to the requested format
-            model_filename = f"model.{output_format.lower()}" # e.g., model.glb
-            model_path = file_manager.get_temp_path(model_filename)
+            model_filename = f"model.{output_format.lower()}"
+            model_path = file_manager.get_temp_path(model_filename) # file_manager handles actual path
             
             logger.info(f"Exporting {output_format.upper()} model to {model_path}")
-            mesh.export(str(model_path)) # Trimesh handles various formats: glb, obj, ply, stl
-            logger.info(f"Exported {output_format.upper()} model to {model_path} in {time.time() - start_time:.2f} seconds. File size: {model_path.stat().st_size / 1024:.2f} KB")
+            # Trimesh export handles various formats and includes UVs by default if mesh.visual.uv exists.
+            mesh_to_export.export(str(model_path)) 
+            
+            file_size_kb = model_path.stat().st_size / 1024
+            logger.info(f"Exported {output_format.upper()} model to {model_path} in {time.time() - start_time:.2f}s. File size: {file_size_kb:.2f} KB")
             
             return model_path # Return path to the generated file
             
         except Exception as e:
             logger.error(f"Error generating final model file ({output_format}): {str(e)}")
+            # Log the full traceback for better debugging from API logs
             logger.error(traceback.format_exc())
-            raise e
+            raise # Re-raise the exception to be caught by the endpoint handler
         finally:
             if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+                torch.cuda.empty_cache() # Final cleanup
     
     return await asyncio.to_thread(worker)
+
 
 # --------------------------------------------------
 # Routes
@@ -397,7 +475,7 @@ async def generate_no_preview(
             arg.mesh_simplify_ratio, 
             arg.texture_size,        
             apply_texture=arg.apply_texture, 
-            output_format=arg.output_format
+            output_format=arg.output_format,
         )
         current_generation["model_url"] = f"/download/model?format={arg.output_format}"
 
@@ -474,7 +552,7 @@ async def generate_multi_no_preview(
             arg.mesh_simplify_ratio,
             arg.texture_size,
             apply_texture=arg.apply_texture,
-            output_format=arg.output_format
+            output_format=arg.output_format,
         )
         current_generation["model_url"] = f"/download/model?format={arg.output_format}"
 

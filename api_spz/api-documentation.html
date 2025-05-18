@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Hunyuan3D API Documentation</title>
+    <title>Stable3DGen API Documentation</title>
     <style>
         :root {
             --primary-color: #c4b5fd;
@@ -200,7 +200,7 @@
 </head>
 <body>
 <div class="container">
-        <h1>Hunyuan3D Generation API Documentation</h1>
+        <h1>Stable3DGen Generation API Documentation</h1>
         
         <div class="endpoint" style="margin-top: -1rem; margin-bottom: 2rem;">
             <p style="color: var(--description-color);">
@@ -220,7 +220,7 @@
                     <ol>
                         <li>POST to <code>/generate_no_preview</code> with your base64 image and parameters</li>
                         <li>Poll <code>/status</code> until completion</li>
-                        <li>GET <code>/download/model</code> to obtain the final GLB</li>
+                        <li>GET <code>/download/model</code> to obtain the final GLB/OBJ</li>
                     </ol>
                 </div>
 
@@ -229,7 +229,7 @@
                     <ol>
                         <li>POST to <code>/generate</code> with your base64 image and simplified parameters</li>
                         <li>Poll <code>/status</code> until completion</li>
-                        <li>GET <code>/download/model</code> to obtain the final GLB</li>
+                        <li>GET <code>/download/model</code> to obtain the final GLB/OBJ</li>
                     </ol>
                 </div>
             </div>
@@ -245,7 +245,7 @@
                         <li>For best results with mv models, provide front/side/back views when possible</li>
                         <li>The system automatically uses front view if only one image is provided</li>
                         <li>Poll <code>/status</code> until completion</li>
-                        <li>GET <code>/download/model</code> to obtain the final GLB</li>
+                        <li>GET <code>/download/model</code> to obtain the final GLB/OBJ</li>
                     </ol>
                 </div>
             </div>
@@ -288,12 +288,13 @@ def generate_from_image(image_path: str):
         params = {
             'image_base64': image_base64,
             'seed': 42,
-            'guidance_scale': 5.0,
-            'num_inference_steps': 20,
-            'octree_resolution': 256,
-            'num_chunks': 80,
-            'mesh_simplify_ratio': 0.1,
-            'apply_texture': True,
+            'ss_guidance_strength': 3.0,
+            'ss_sampling_steps': 50,
+            'slat_guidance_strength': 3.0,
+            'slat_sampling_steps': 6,
+            'mesh_simplify_ratio': 95.0,
+            'apply_texture': True,      # Set to True to get UV unwrapping
+            'texture_size': 1024,
             'output_format': 'glb'
         }
         
@@ -349,12 +350,13 @@ def generate_from_image(image_path: str):
         params = {
             'image_list_base64': image_base64_list,
             'seed': 42,
-            'guidance_scale': 5.0,
-            'num_inference_steps': 20,
-            'octree_resolution': 256,
-            'num_chunks': 80,
-            'mesh_simplify_ratio': 0.1,
-            'apply_texture': True,
+            'ss_guidance_strength': 3.0,
+            'ss_sampling_steps': 50,
+            'slat_guidance_strength': 3.0,
+            'slat_sampling_steps': 6,
+            'mesh_simplify_ratio': 95.0,
+            'apply_texture': True,      # Set to True to get UV unwrapping
+            'texture_size': 1024,       # Make sure this is included if relevant to apply_texture
             'output_format': 'glb'
         }
         
@@ -439,32 +441,40 @@ def generate_from_image(image_path: str):
                         <p>List of base64-encoded images</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">seed</span>: int (default: 1234)
-                        <p>Random seed for generation</p>
+                        <span class="parameter-name">seed</span>: int (default: value from GenerationArgForm)
+                        <p>Random seed. -1 or 0 for random.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">guidance_scale</span>: float (default: 5.0)
-                        <p>Guidance scale for generation</p>
+                        <span class="parameter-name">ss_guidance_strength</span>: float (default: 3.0, range: 0.0-10.0)
+                        <p>Sparse Structure Guidance Strength.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">num_inference_steps</span>: int (default: 20)
-                        <p>Number of inference steps</p>
+                        <span class="parameter-name">ss_sampling_steps</span>: int (default: 50, range: 1-50)
+                        <p>Sparse Structure Sampling Steps.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">octree_resolution</span>: int (default: 256)
-                        <p>Resolution of the octree for mesh extraction</p>
+                        <span class="parameter-name">slat_guidance_strength</span>: float (default: 3.0, range: 0.0-10.0)
+                        <p>Structured Latent Guidance Strength.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">num_chunks</span>: int (default: 80)
-                        <p>Number of chunks for mesh extraction (internally multiplied by 1000)</p>
+                        <span class="parameter-name">slat_sampling_steps</span>: int (default: 6, range: 1-50)
+                        <p>Structured Latent Sampling Steps.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">mesh_simplify</span>: float (default: 0.1)
-                        <p>Ratio for mesh simplification (0-1 or 0-100)</p>
+                        <span class="parameter-name">mesh_simplify_ratio</span>: float (default: 95.0, range: >0-100)
+                        <p>Mesh simplification ratio (0-100). Note: Simplification currently not applied in this API flow.</p>
                     </div>
                     <div class="parameter">
                         <span class="parameter-name">apply_texture</span>: boolean (default: false)
-                        <p>Whether to apply texture to the model</p>
+                        <p>If set to <code>true</code>, the generated mesh will undergo UV unwrapping using the xatlas library with specific internal settings (e.g., max_cost=8.0, normal_seam_weight=1.0, padding=2) to attempt to create larger UV islands. The <code>texture_size</code> parameter will be used as the target resolution for the UV atlas. Skipped for "stl" output.</p>
+                    </div>
+                    <div class="parameter">
+                        <span class="parameter-name">texture_size</span>: int (default: 1024, range: 512-4096)
+                        <p>Target resolution for the UV atlas if <code>apply_texture</code> is true.</p>
+                    </div>
+                    <div class="parameter">
+                        <span class="parameter-name">output_format</span>: string (default: "glb", options: "glb", "obj", "ply", "stl")
+                        <p>Desired output format.</p>
                     </div>
                 </div>
             </div>
@@ -480,36 +490,40 @@ def generate_from_image(image_path: str):
                         <p>Image file upload or base64-encoded image data</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">seed</span>: int (default: 1234)
-                        <p>Random seed for generation</p>
+                        <span class="parameter-name">seed</span>: int (default: from GenerationArgForm)
+                        <p>Random seed. -1 or 0 for random.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">guidance_scale</span>: float (default: 5.0)
-                        <p>Guidance scale for generation</p>
+                        <span class="parameter-name">ss_guidance_strength</span>: float (default: 3.0, range: 0.0-10.0)
+                        <p>Sparse Structure Guidance Strength.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">num_inference_steps</span>: int (default: 20)
-                        <p>Number of inference steps</p>
+                        <span class="parameter-name">ss_sampling_steps</span>: int (default: 50, range: 1-50)
+                        <p>Sparse Structure Sampling Steps.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">octree_resolution</span>: int (default: 256)
-                        <p>Resolution of the octree for mesh extraction</p>
+                        <span class="parameter-name">slat_guidance_strength</span>: float (default: 3.0, range: 0.0-10.0)
+                        <p>Structured Latent Guidance Strength.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">num_chunks</span>: int (default: 80)
-                        <p>Number of chunks for mesh extraction (internally multiplied by 1000)</p>
+                        <span class="parameter-name">slat_sampling_steps</span>: int (default: 6, range: 1-50)
+                        <p>Structured Latent Sampling Steps.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">mesh_simplify_ratio</span>: float (default: 0.1)
-                        <p>Ratio for mesh simplification (0-1 or 0-100)</p>
+                        <span class="parameter-name">mesh_simplify_ratio</span>: float (default: 95.0, range: >0-100)
+                        <p>Mesh simplification ratio (0-100). Note: Simplification currently not applied in this API flow.</p>
                     </div>
                     <div class="parameter">
                         <span class="parameter-name">apply_texture</span>: boolean (default: false)
-                        <p>Whether to apply texture to the model</p>
+                        <p>If set to <code>true</code>, triggers UV unwrapping using xatlas (using settings like max_cost=8.0, normal_seam_weight=1.0). The <code>texture_size</code> parameter sets the UV atlas resolution. Skipped for "stl" output.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">output_format</span>: string (default: "glb")
-                        <p>Output format (glb or obj)</p>
+                        <span class="parameter-name">texture_size</span>: int (default: 1024, range: 512-4096)
+                        <p>Target resolution for the UV atlas if <code>apply_texture</code> is true.</p>
+                    </div>
+                    <div class="parameter">
+                        <span class="parameter-name">output_format</span>: string (default: "glb", options: "glb", "obj", "ply", "stl")
+                        <p>Desired output format.</p>
                     </div>
                 </div>
             </div>
@@ -571,7 +585,7 @@ def generate_from_image(image_path: str):
             <div class="endpoint">
                 <span class="method get">GET</span>
                 <span class="endpoint-path">/download/model</span>
-                <p class="description">Download the final 3D model (GLB format, with texture if requested).</p>
+                <p class="description">Download the final 3D geometry. The format can be specified via a query parameter (default 'glb'). If <code>apply_texture</code> was true during generation (and not STL format), the geometry will have UVs generated by xatlas.</p>
             </div>
         </section>
 
@@ -580,36 +594,40 @@ def generate_from_image(image_path: str):
             <div class="endpoint">
                 <div class="parameters">
                     <div class="parameter">
-                        <span class="parameter-name">seed</span>: int (default: 1234)
-                        <p>Random seed for reproducible generation</p>
+                        <span class="parameter-name">seed</span>: int (default: from GenerationArgForm, e.g., 42)
+                        <p>Random seed for generation. If set to -1 or 0, a random seed will be used.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">guidance_scale</span>: float (0-10, default: 5.0)
-                        <p>Controls how closely the model follows the input image. Higher values produce more faithful results but may be less creative.</p>
+                        <span class="parameter-name">ss_guidance_strength</span>: float (default: 3.0, range: 0.0-10.0)
+                        <p>Sparse Structure Sampler: Guidance Strength. Controls adherence to the input image during sparse structure generation.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">num_inference_steps</span>: int (1-50, default: 20)
-                        <p>Number of denoising steps. More steps generally produce better quality but take longer.</p>
+                        <span class="parameter-name">ss_sampling_steps</span>: int (default: 50, range: 1-50)
+                        <p>Sparse Structure Sampler: Number of sampling steps.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">octree_resolution</span>: int (128-512, default: 256)
-                        <p>Resolution of the octree for mesh extraction. Higher values produce more detailed meshes but require more VRAM.</p>
+                        <span class="parameter-name">slat_guidance_strength</span>: float (default: 3.0, range: 0.0-10.0)
+                        <p>Structured Latent Sampler: Guidance Strength. Controls adherence during structured latent refinement.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">num_chunks</span>: int (1-200, default: 80)
-                        <p>Number of chunks for mesh extraction (internally multiplied by 1000). Higher values use less VRAM but take longer.</p>
+                        <span class="parameter-name">slat_sampling_steps</span>: int (default: 6, range: 1-50)
+                        <p>Structured Latent Sampler: Number of sampling steps.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">mesh_simplify_ratio</span>: float (0-1 or 0-100, default: 0.1)
-                        <p>Ratio for mesh simplification. Lower values create simpler meshes with fewer polygons.</p>
+                        <span class="parameter-name">mesh_simplify_ratio</span>: float (default: 95.0, range: >0.0-100.0)
+                        <p>Target mesh simplification ratio (percentage of faces to keep, e.g., 95.0 means keep 95%). Note: Mesh simplification is currently NOT APPLIED in this API flow after the main Hi3DGen pipeline, so this parameter may not have a visible effect on the final output mesh complexity from this API.</p>
                     </div>
                     <div class="parameter">
                         <span class="parameter-name">apply_texture</span>: boolean (default: false)
-                        <p>Whether to apply texture to the model. When true, texture generation will be performed after mesh creation.</p>
+                        <p>If set to <code>true</code>, the generated mesh will undergo UV unwrapping using the xatlas library. The xatlas process uses specific internal settings (e.g., max_cost=8.0, normal_seam_weight=1.0, padding=2) to attempt to create larger UV islands. The <code>texture_size</code> parameter will be used as the target resolution for the UV atlas generated by xatlas. This UV unwrapping step is skipped if the <code>output_format</code> is "stl" (as STL does not support UVs). Note: This flag controls UV unwrapping; the Hi3DGen core pipeline does not perform actual texture *application*.</p>
+                    </div>
+                    <div class="parameter">
+                        <span class="parameter-name">texture_size</span>: int (default: 1024, range: 512-4096)
+                        <p>Specifies the target resolution for the UV atlas generated by xatlas when <code>apply_texture</code> is true. For example, 1024 means xatlas will try to pack UV charts into a 1024x1024 space.</p>
                     </div>
                     <div class="parameter">
                         <span class="parameter-name">output_format</span>: string (default: "glb")
-                        <p>Output format. Currently supports "glb" or "obj".</p>
+                        <p>Output format for the 3D model. Supported: "glb", "obj", "ply", "stl".</p>
                     </div>
                 </div>
             </div>
