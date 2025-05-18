@@ -272,10 +272,15 @@ if __name__ == "__main__":
 
     # Initialize normal predictor
     try:
-        normal_predictor = torch.hub.load(os.path.join(torch.hub.get_dir(), 'hugoycj_StableNormal_main'), "StableNormal_turbo", yoso_version='yoso-normal-v1-8-1', source='local', local_cache_dir='./weights', pretrained=True)
-    except:
+        normal_predictor = torch.hub.load(
+            os.path.join(torch.hub.get_dir(), 'hugoycj_StableNormal_main'), 
+            "StableNormal_turbo", 
+            yoso_version='yoso-normal-v1-8-1', 
+            source='local', 
+            local_cache_dir='./weights' ) #removed the pretrained=True, was causing exception
+    except Exception as e:
         normal_predictor = torch.hub.load("hugoycj/StableNormal", "StableNormal_turbo", trust_repo=True, yoso_version='yoso-normal-v1-8-1', local_cache_dir='./weights')    
 
     # Launch the app
-    demo.launch(share=False, server_name="0.0.0.0")
+    demo.launch(share=False, server_name="127.0.0.1")
 

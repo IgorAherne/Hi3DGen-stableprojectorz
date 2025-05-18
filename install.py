@@ -206,7 +206,7 @@ def install_dependencies():
         
         # Install Gradio last
         run_command_with_retry(
-            "pip install gradio==4.44.1 gradio_litmodel3d==0.0.1",
+            "pip install gradio==4.44.1 gradio_litmodel3d==0.0.1 pydantic==2.10.6",
             "Installing gradio for web app"
         )
         print("\nInstallation completed successfully!")

@@ -16,3 +16,4 @@ trimesh
 numpy==1.26.4
 scikit-image
 gradio>=4.32.1
+pydantic==2.10.6
