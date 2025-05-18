@@ -29,6 +29,7 @@ class GenerationArgForm:
         # For now, apply_texture will effectively be ignored in the core hi3dgen part.
         apply_texture: bool = Form(False),
         texture_size: int = Form(1024), # Default, but not used by hi3dgen core
+
     ):
         self.seed = seed
         self.ss_guidance_strength = ss_guidance_strength

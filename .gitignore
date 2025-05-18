@@ -7,3 +7,4 @@ venv\*
 /temp
 /tmp
 /trimesh
+/temp_api
