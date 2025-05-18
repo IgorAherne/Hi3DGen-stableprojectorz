@@ -149,10 +149,9 @@ def cache_weights_api(weights_dir_path: Path) -> dict:
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI): # Renamed app to app_instance to avoid conflict
     logger.info("Server lifespan startup sequence initiated.")
-    # --- Startup: Cache weights first ---
+
     cache_weights_api(final_weights_dir) # Use the determined final_weights_dir
 
-    # --- Then, initialize models and resources ---
     final_device_name = args.device
     if final_device_name is None:
         final_device_name = "cuda" if torch.cuda.is_available() else "cpu"
