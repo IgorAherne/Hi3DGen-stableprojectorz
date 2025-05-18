@@ -6,7 +6,6 @@ from pydantic import BaseModel, Field
 
 class TaskStatus(str, Enum):
     PROCESSING = "PROCESSING"
-    PREVIEW_READY = "PREVIEW_READY"
     COMPLETE = "COMPLETE"
     FAILED = "FAILED"
 
@@ -14,36 +13,39 @@ class TaskStatus(str, Enum):
 class GenerationArgForm:
     def __init__(
         self,
-        seed: int = Form(1234),
-        guidance_scale: float = Form(5.0),
-        num_inference_steps: int = Form(20),
-        octree_resolution: int = Form(256),
-        num_chunks: int = Form(80),
-        mesh_simplify_ratio: float = Form(0.1),
-        apply_texture: bool = Form(False),
-        texture_size: int = Form(2048),
+        seed: int = Form(42), # Default from hi3dgen.py, app.py uses 0 then random
+        # Parameters for Sparse Structure Sampler
+        ss_guidance_strength: float = Form(3.0),
+        ss_sampling_steps: int = Form(50),
+        # Parameters for Structured Latent (slat) Sampler
+        slat_guidance_strength: float = Form(3.0),
+        slat_sampling_steps: int = Form(6),
+        # Post-processing
+        mesh_simplify_ratio: float = Form(95.0), # UI sends 0-100, will be normalized to 0.0-1.0
+        # Output format
         output_format: str = Form("glb"),
+        # Texturing - Hi3DGen does not seem to have an integrated texturing pipeline.
+        # Keep these for potential future integration or if a separate texturing step is added.
+        # For now, apply_texture will effectively be ignored in the core hi3dgen part.
+        apply_texture: bool = Form(False),
+        texture_size: int = Form(1024), # Default, but not used by hi3dgen core
     ):
         self.seed = seed
-        self.guidance_scale = guidance_scale
-        self.num_inference_steps = num_inference_steps
-        self.octree_resolution = octree_resolution
-        self.num_chunks = num_chunks*1000
-        self.mesh_simplify_ratio = mesh_simplify_ratio
+        self.ss_guidance_strength = ss_guidance_strength
+        self.ss_sampling_steps = ss_sampling_steps
+        self.slat_guidance_strength = slat_guidance_strength
+        self.slat_sampling_steps = slat_sampling_steps
+        self.mesh_simplify_ratio = mesh_simplify_ratio # Will be normalized in generation.py
+        self.output_format = output_format
         self.apply_texture = apply_texture
         self.texture_size = texture_size
-        self.output_format = output_format
 
 
 class GenerationResponse(BaseModel):
-    # No task_id anymore, we focus on a single generation
     status: TaskStatus
     progress: int = 0
     message: str = ""
-    # Only used if we did "generate_preview"
-    preview_urls: Optional[Dict[str, str]] = None
-    # Only used if generation is complete
-    model_url: Optional[str] = None
+    model_url: Optional[str] = None # Only used if generation is complete
 
 
 class StatusResponse(BaseModel):

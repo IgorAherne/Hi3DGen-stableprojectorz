@@ -6,13 +6,13 @@ from typing import Dict, Optional, List
 import asyncio
 import io
 import base64
+import numpy as np
 import os
 from fastapi import APIRouter, File, Response, UploadFile, Form, HTTPException, Query, Depends
 from fastapi.responses import FileResponse
 from PIL import Image
 import torch
-
-from hy3dgen.shapegen.pipelines import export_to_trimesh
+import trimesh
 
 from api_spz.core.exceptions import CancelledException
 from api_spz.core.files_manage import file_manager
@@ -27,7 +27,7 @@ from api_spz.core.models_pydantic import (
 
 router = APIRouter()
 
-logger = logging.getLogger("trellis") #was already setup earlier, during main.
+logger = logging.getLogger("stable3dgen_api") 
 
 cancel_event = asyncio.Event() # This event will be set by the endpoint /interrupt
 
@@ -80,26 +80,31 @@ async def cleanup_generation_files(keep_videos: bool = False, keep_model: bool =
     file_manager.cleanup_generation_files(keep_videos=keep_videos, keep_model=keep_model)
 
 
-# Validate input
 def _gen_3d_validate_params(file_or_files, b64_or_b64list, arg: GenerationArgForm):
     """Validate incoming parameters before generation."""
     if (not file_or_files or len(file_or_files) == 0) and (not b64_or_b64list or len(b64_or_b64list) == 0):
         raise HTTPException(400, "No input images provided")
-    # Range checks:
-    if not (0 < arg.guidance_scale <= 10):
-        raise HTTPException(status_code=400, detail="Guidance scale must be above 0 and <= 10")
-    if not (0 < arg.num_inference_steps <= 50):
-        raise HTTPException(status_code=400, detail="Inference steps must be above 0 and <= 50")
-    if not (128 <= arg.octree_resolution <= 512):
-        raise HTTPException(status_code=400, detail="Octree resolution must be between 128 and 512")
-    if not (1000 <= arg.num_chunks <= 200000):
-        raise HTTPException(status_code=400, detail="Number of chunks must be between 1000 and 200000")
+    # Range checks for Hi3DGen parameters (based on app.py sliders)
+    if not (0.0 <= arg.ss_guidance_strength <= 10.0):
+        raise HTTPException(status_code=400, detail="Sparse Structure Guidance Strength must be between 0.0 and 10.0")
+    if not (1 <= arg.ss_sampling_steps <= 50):
+        raise HTTPException(status_code=400, detail="Sparse Structure Sampling Steps must be between 1 and 50")
+    
+    if not (0.0 <= arg.slat_guidance_strength <= 10.0):
+        raise HTTPException(status_code=400, detail="Structured Latent Guidance Strength must be between 0.0 and 10.0")
+    if not (1 <= arg.slat_sampling_steps <= 50):
+        raise HTTPException(status_code=400, detail="Structured Latent Sampling Steps must be between 1 and 50")
+
     if not (0 < arg.mesh_simplify_ratio <= 100): 
-        raise HTTPException(status_code=400, detail="mesh_simplify_ratio must be between 0 and 1, or between 0 and 100")
-    if not (512 <= arg.texture_size <= 4096):
-        raise HTTPException(status_code=400, detail="Texture size must be between 512 and 4096")
-    if arg.output_format not in ["glb", "obj"]:
-        raise HTTPException(status_code=400, detail="Unsupported output format")
+        raise HTTPException(status_code=400, detail="mesh_simplify_ratio must be between 0 (exclusive) and 100 (inclusive)")
+    
+    if arg.apply_texture:
+        logger.warning("apply_texture is True, but Hi3DGen pipeline does not have integrated texturing. This option may not have an effect unless a separate texturing module is used.")
+        if not (512 <= arg.texture_size <= 4096):
+             raise HTTPException(status_code=400, detail="Texture size must be between 512 and 4096")
+    
+    if arg.output_format not in ["glb", "obj", "ply", "stl"]: # Match app.py export options
+        raise HTTPException(status_code=400, detail="Unsupported output format. Supported: glb, obj, ply, stl")
 
 
 
@@ -148,112 +153,70 @@ async def _load_images_into_list( files: Optional[List[UploadFile]] = None,
 
 
 
-# If `pil_images` is a single PIL.Image, calls pipeline.run(...).
-# If `pil_images` is a list of multiple PIL.Images, calls pipeline.run_multi_image(...).
-# Returns the pipeline outputs dictionary.
-async def _run_pipeline_generate_3d(pil_images, arg):
-    """Generate 3D structure using Hunyuan3D pipeline"""
+async def _run_pipeline_generate_3d(pil_input_image: Image.Image, arg: GenerationArgForm) -> Dict:
+    """
+    Generates a 3D mesh from a single PIL image using Hi3DGen.
+    Includes: image preprocessing, normal map generation, Hi3DGen pipeline execution, and Trimesh conversion.
+    """
     def worker():
         try:
-            state.ensure_shape_model_on_gpu()
-            pipeline = state.pipeline
+            hi3dgen_pipeline = state.pipeline
+            normal_predictor = state.normal_predictor
+            
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            seed_to_use = arg.seed
+            if seed_to_use == -1 or seed_to_use == 0: # app.py maps 0 to random
+                seed_to_use = np.random.randint(1, np.iinfo(np.int32).max)
+            
+            # 1. Preprocess input_pil_image for normal generation (BG removal, crop, pad, resize by Hi3DGen's method)
+            #    Input is RGBA for consistent alpha handling by hi3dgen_pipeline.preprocess_image
+            logger.info("Preprocessing input image for normal map generation...")
+            processed_for_normal = hi3dgen_pipeline.preprocess_image(pil_input_image.convert("RGBA"), resolution=1024)
 
-            rembg = state.rembg
+            # 2. Generate Normal Map using external normal_predictor
+            logger.info("Generating normal map...")
+            normal_image_pil = normal_predictor(processed_for_normal, resolution=768, match_input_resolution=True, data_type='object')
+
+            # 3. Run Hi3DGen Pipeline with the generated normal map
+            logger.info("Running Hi3DGen pipeline...")
+            pipeline_output_internal = hi3dgen_pipeline.run(
+                image=normal_image_pil, # This is the normal map
+                seed=seed_to_use,
+                formats=["mesh"], # We always want a mesh representation
+                preprocess_image=False, # Normal map is already prepared and preprocessed
+                sparse_structure_sampler_params={
+                    "steps": arg.ss_sampling_steps,
+                    "cfg_strength": arg.ss_guidance_strength,
+                },
+                slat_sampler_params={
+                    "steps": arg.slat_sampling_steps,
+                    "cfg_strength": arg.slat_guidance_strength,
+                },
+            )
             
-            # Clear CUDA cache before starting
-            torch.cuda.empty_cache()
+            internal_mesh_representation = pipeline_output_internal['mesh'][0]
+            if internal_mesh_representation is None:
+                raise RuntimeError("Hi3DGen pipeline did not return a mesh representation.")
             
-            # Set up generator for reproducible results
-            generator = torch.Generator(device="cuda").manual_seed(arg.seed)
+            # 4. Convert Hi3DGen's internal mesh to Trimesh
+            logger.info("Converting to Trimesh object...")
+            mesh_trimesh = internal_mesh_representation.to_trimesh(transform_pose=True)
             
-            # Common parameters for all pipeline calls
-            pipeline_params = {
-                "num_inference_steps": arg.num_inference_steps,
-                "guidance_scale": arg.guidance_scale,
-                "generator": generator,
-                "octree_resolution": arg.octree_resolution,
-                "num_chunks": arg.num_chunks,
-                "output_type": 'mesh',
-            }
-            
-            # Process input based on type (single image or multi-view)
-            if isinstance(pil_images, list):
-                # Check if we're using MV model
-                if "mv" in state.model_path.lower():
-                    # MV models always require a dictionary with view names
-                    processed_images = {}
-                    view_names = [
-                        'front',  # 0° azimuth
-                        'right',  # 90° azimuth
-                        'back',   # 180° azimuth
-                        'left',   # 270° azimuth
-                        'top',    # 90° elevation (if available)
-                        'bottom'  # -90° elevation (if available)
-                    ]
-                    
-                    # Process available images using the correct mapping
-                    for i, img in enumerate(pil_images):
-                        if i < len(view_names):
-                            processed_image = rembg(img.convert('RGB'))
-                            processed_images[view_names[i]] = processed_image
-                    
-                    # MV model always requires at least the front view
-                    if 'front' not in processed_images and len(pil_images) > 0:
-                        processed_images['front'] = rembg(pil_images[0].convert('RGB'))
-                        
-                    # Pass the dictionary directly to the pipeline
-                    raw_outputs = pipeline(
-                        image=processed_images,
-                        **pipeline_params
-                    )
-                else:
-                    # Standard model - just use first image
-                    if len(pil_images) > 1:
-                        logger.warning("Using multiple images but not using multiview model. Using only the first image.")
-                    processed_image = rembg(pil_images[0].convert('RGB'))
-                    raw_outputs = pipeline(image=processed_image, **pipeline_params)
-            else:
-                # Single image directly (not in a list)
-                if "mv" in state.model_path.lower():
-                    # MV model needs dictionary format
-                    processed_images = {
-                        'front': rembg(pil_images.convert('RGB'))
-                    }
-                    raw_outputs = pipeline(
-                        image=processed_images,
-                        **pipeline_params
-                    )
-                else:
-                    # Standard model
-                    processed_image = rembg(pil_images.convert('RGB'))
-                    raw_outputs = pipeline(image=processed_image, **pipeline_params)
-            
-            # Convert to trimesh and apply post-processing
-            mesh = export_to_trimesh(raw_outputs)[0]
-            mesh = state.floater_remover(mesh)
-            mesh = state.degenerate_face_remover(mesh)
-            
-            # Store the original image for texture generation
-            if not isinstance(pil_images, list):
-                original_image = pil_images
-            else:
-                original_image = pil_images[0] if len(pil_images) > 0 else None
-            
-            # Create a structure that mimics what Trellis would return
-            # so the rest of StableProjectorz code can work with it
             outputs = {
-                "mesh": [mesh],
-                "gaussian": [mesh],  # Use mesh as stand-in for gaussian format
-                "original_image": original_image
+                "mesh": [mesh_trimesh], # List to maintain consistency with previous structure
+                "original_image": pil_input_image # Original input image for potential future use (e.g. texturing)
             }
-            
             return outputs
             
         except Exception as e:
-            logger.error(f"Error in 3D generation: {str(e)}")
+            logger.error(f"Error in Hi3DGen 3D generation worker: {str(e)}")
+            logger.error(traceback.format_exc())
             raise e
         finally:
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
     
     return await asyncio.to_thread(worker)
 
@@ -266,61 +229,59 @@ def normalize_meshSimplify_ratio(ratio: float) -> float:
     return ratio
 
 
-async def _run_pipeline_generate_glb(outputs, mesh_simplify_ratio:float, texture_size:int, apply_texture:bool=False):
-    """Generate final GLB model with optional texturing"""
-    mesh_simplify_ratio = normalize_meshSimplify_ratio(mesh_simplify_ratio)
+async def _run_pipeline_generate_glb(
+    outputs: Dict,             # Expected to contain 'mesh': [trimesh_object]
+    mesh_simplify_ratio: float, # Received from args, but not used in this simplified version
+    texture_size: int,           # Received from args, but not used
+    apply_texture: bool = False, # Received from args, but not used
+    output_format: str = "glb"
+):
+    """
+    Generate final 3D model file (GLB, OBJ, etc.) from Trimesh object.
+    This version matches app.py: no simplification or advanced cleaning from Hi3DGen output.
+    Texturing is also not part of Hi3DGen's core pipeline.
+    """
+    if mesh_simplify_ratio < 100.0 and mesh_simplify_ratio > 0.0: # Check if it's not 1.0 or 100%
+         logger.info(f"Mesh simplification ratio is {mesh_simplify_ratio}, but simplification is not applied in this flow to match hi3dgen's app.py.")
 
     def worker():
         try:
             start_time = time.time()
             
-            # Clear CUDA cache
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available(): # Good practice
+                torch.cuda.empty_cache()
             
-            mesh = outputs["mesh"][0]
-            original_image = outputs.get("original_image")
-            
-            # Apply mesh preprocessing
-            logger.info(f"Processing mesh (faces: {len(mesh.faces)})")
-            mesh = state.floater_remover(mesh)
-            mesh = state.degenerate_face_remover(mesh)
-            
-            # Apply mesh simplification if requested
-            if mesh_simplify_ratio < 1.0:
-                target_faces = int(len(mesh.faces) * mesh_simplify_ratio)
-                logger.info(f"Reducing faces to {target_faces}")
-                mesh = state.face_reducer(mesh, max_facenum=target_faces)
-            
-            # Only apply texturing if requested for this generation
-            if apply_texture and hasattr(state, 'texture_pipeline') and state.texture_pipeline is not None and original_image is not None:
-                try:
-                    state.unload_shape_model()  # CRITICAL: Unload shape model to free ~6GB VRAM for texture generation
-                    state.optimize_texture_pipeline() #memory optimization
+            mesh: trimesh.Trimesh = outputs["mesh"][0] # Expecting a Trimesh object
+            # original_image = outputs.get("original_image") # PIL Image, for potential texturing
 
-                    logger.info("Starting texture generation...")
-                    textured_mesh = state.texture_pipeline(mesh, image=original_image)
-                    mesh = textured_mesh
-                    logger.info("Applied texture to mesh successfully")
-                except Exception as tex_err:
-                    logger.error(f"Texture application failed: {str(tex_err)}")
-                    # Continue with untextured mesh
-            else:
-                logger.info("Skipping texture generation for this request")
+            if not isinstance(mesh, trimesh.Trimesh):
+                logger.error(f"Expected a trimesh.Trimesh object in outputs['mesh'][0], but got {type(mesh)}")
+                raise ValueError("Invalid mesh object provided for GLB generation.")
+
+            logger.info(f"Received mesh for export with {len(mesh.faces)} faces and {len(mesh.vertices)} vertices.")
+
+            # Texturing: Hi3DGen does not provide an integrated texturing pipeline in app.py.
+            if apply_texture:
+                logger.warning("apply_texture is True, but Hi3DGen pipeline shown in app.py does not have integrated texturing. This option will be ignored for model export unless a separate texturing module is implemented and called here.")
+            # No texturing logic from state.texture_pipeline is called here.
+
+            # Export to the requested format
+            model_filename = f"model.{output_format.lower()}" # e.g., model.glb
+            model_path = file_manager.get_temp_path(model_filename)
             
-            # Export to GLB
-            model_path = file_manager.get_temp_path("model.glb")
-            mesh.export(str(model_path))
-            logger.info(f"Exported GLB model to {model_path} in {time.time() - start_time:.2f} seconds")
+            logger.info(f"Exporting {output_format.upper()} model to {model_path}")
+            mesh.export(str(model_path)) # Trimesh handles various formats: glb, obj, ply, stl
+            logger.info(f"Exported {output_format.upper()} model to {model_path} in {time.time() - start_time:.2f} seconds. File size: {model_path.stat().st_size / 1024:.2f} KB")
             
-            return model_path
+            return model_path # Return path to the generated file
             
         except Exception as e:
-            logger.error(f"Error generating GLB: {str(e)}")
-            import traceback
+            logger.error(f"Error generating final model file ({output_format}): {str(e)}")
             logger.error(traceback.format_exc())
             raise e
         finally:
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
     
     return await asyncio.to_thread(worker)
 
@@ -334,7 +295,7 @@ async def ping():
     busy = is_generation_in_progress()
     return {
         "status": "running",
-        "message": "Trellis API is operational",
+        "message": "Stable3DGen (Hi3DGen) API is operational",
         "busy": busy
     }
 
@@ -358,59 +319,59 @@ async def generate_no_preview(
     image_base64: Optional[str] = Form(None),
     arg: GenerationArgForm = Depends()
 ):
-    """Generate a 3D model directly (no preview)."""
-    print()#empty line, for an easier read.
-    logger.info("Client asked to generate")
-    # Acquire the lock (non-blocking)
+    """Generate a 3D model directly from a single input image."""
+    print() 
+    logger.info(f"Request: /generate_no_preview, Output format: {arg.output_format.upper()}")
     try:
         await asyncio.wait_for(generation_lock.acquire(), timeout=0.001)
     except asyncio.TimeoutError:
-        raise HTTPException( status_code=503, detail="Server is busy with another generation")
+        raise HTTPException(status_code=503, detail="Server is busy with another generation")
     
     start_time = time.time() 
-    # We have the lock => let's reset the "current_generation"
     reset_current_generation()
     try:
         _gen_3d_validate_params(file, image_base64, arg)
+        single_pil_image = await _gen_3d_get_image(file, image_base64)
 
-        #construct an image
-        image = await _gen_3d_get_image(file, image_base64)
+        update_current_generation(status=TaskStatus.PROCESSING, progress=10, message="Generating 3D structure (incl. normal map)...")
+        outputs = await _run_pipeline_generate_3d(single_pil_image, arg)
+        update_current_generation(progress=50, message="Trimesh object generated, preparing final model file...", outputs=outputs)
 
-        update_current_generation( status=TaskStatus.PROCESSING, progress=10, message="Generating 3D structure...")
-        outputs = await _run_pipeline_generate_3d(image, arg)
-        update_current_generation( progress=50, message="3D structure generated", outputs=outputs)
+        update_current_generation(progress=70, message=f"Generating {arg.output_format.upper()} file...")
+        await _run_pipeline_generate_glb(
+            outputs, 
+            arg.mesh_simplify_ratio, 
+            arg.texture_size,        
+            apply_texture=arg.apply_texture, 
+            output_format=arg.output_format
+        )
+        current_generation["model_url"] = f"/download/model?format={arg.output_format}"
 
-        # Generate final GLB
-        update_current_generation( progress=70, message="Generating GLB file..." )
-        await _run_pipeline_generate_glb(outputs, arg.mesh_simplify_ratio, arg.texture_size, apply_texture=arg.apply_texture)
-
-        # Done
-        update_current_generation( status=TaskStatus.COMPLETE, progress=100, message="Generation complete")
-
-        # Clean up intermediate files, keep final model
+        update_current_generation(status=TaskStatus.COMPLETE, progress=100, message="Generation complete")
         await cleanup_generation_files(keep_model=True)
 
-        duration = time.time() - start_time  # Calculate duration before return
-        logger.info(f"Generation completed in {duration:.2f} seconds")
+        duration = time.time() - start_time
+        logger.info(f"Generation completed in {duration:.2f}s. Format: {arg.output_format.upper()}")
         return GenerationResponse(
             status=TaskStatus.COMPLETE,
             progress=100,
             message="Generation complete",
-            model_url="/download/model"  # single endpoint
+            model_url=current_generation["model_url"] 
         )
-    except CancelledException as cex:
-        # Cancel was triggered mid-generation
-        update_current_generation( status=TaskStatus.FAILED, progress=0, message="Cancelled by user")
+    except CancelledException:
+        update_current_generation(status=TaskStatus.FAILED, progress=0, message="Cancelled by user")
         await cleanup_generation_files()
         raise HTTPException(status_code=499, detail="Generation cancelled by user")
     except Exception as e:
         error_trace = traceback.format_exc()
-        logger.error(error_trace)
-        update_current_generation( status=TaskStatus.FAILED, progress=0, message=str(e))
+        logger.error(f"Error in /generate_no_preview: {error_trace}")
+        update_current_generation(status=TaskStatus.FAILED, progress=0, message=str(e))
         await cleanup_generation_files()
+        if isinstance(e, HTTPException): raise e
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         generation_lock.release()
+
 
 
 
@@ -421,57 +382,69 @@ async def generate_multi_no_preview(
     arg: GenerationArgForm = Depends(),
 ):
     """
-    Generate a 3D model using multiple images, directly (no preview).
-    The pipeline will receive [img1, img2, ...] as input.
+    Generate a 3D model from a list of images.
+    IMPORTANT: This currently processes ONLY THE FIRST image from the list due to
+    Hi3DGen's app.py focusing on single-image workflows and unclear status of its
+    direct multi-image pipeline capabilities for this API's context.
     """
-    print()#empty line, for an easier read.
-    logger.info("Client asked to multi-view-generate")
+    print()
+    logger.info(f"Request: /generate_multi_no_preview, Output format: {arg.output_format.upper()}")
+    logger.warning("Current /generate_multi_no_preview processes ONLY THE FIRST image from the input list.")
+
     try:
         await asyncio.wait_for(generation_lock.acquire(), timeout=0.001)
     except asyncio.TimeoutError:
-        raise HTTPException( status_code=503, detail="Server is busy with another generation")
+        raise HTTPException(status_code=503, detail="Server is busy with another generation")
     
     start_time = time.time() 
-    # We have the lock => let's reset the "current_generation"
     reset_current_generation()
 
     try:
         _gen_3d_validate_params(file_list, image_list_base64, arg)
-        # construct images:
-        images = await _load_images_into_list(file_list, image_list_base64)
+        all_pil_images = await _load_images_into_list(file_list, image_list_base64)
+        
+        if not all_pil_images:
+            raise HTTPException(status_code=400, detail="No images provided for multi-view generation.")
 
-        update_current_generation(status=TaskStatus.PROCESSING, progress=10, message="Generating 3D structure...")
-        outputs = await _run_pipeline_generate_3d(images, arg)
-        update_current_generation(progress=50, message="3D structure generated", outputs=outputs)
+        first_pil_image = all_pil_images[0] 
+        # To enable true multi-image: _run_pipeline_generate_3d would need to handle a list of images
+        # and correctly interface with hi3dgen_pipeline.run_multi_image (if deemed ready).
 
-        # 2) Generate final GLB
-        update_current_generation(progress=70, message="Generating GLB file...")
-        await _run_pipeline_generate_glb(outputs, arg.mesh_simplify_ratio, arg.texture_size, apply_texture=arg.apply_texture)
+        update_current_generation(status=TaskStatus.PROCESSING, progress=10, message="Generating 3D structure (using first image, incl. normal map)...")
+        outputs = await _run_pipeline_generate_3d(first_pil_image, arg) # Pass only the first image
+        update_current_generation(progress=50, message="Trimesh object generated, preparing final model file...", outputs=outputs)
 
-        # Done
-        update_current_generation(status=TaskStatus.COMPLETE, progress=100, message="Generation complete")
+        update_current_generation(progress=70, message=f"Generating {arg.output_format.upper()} file...")
+        await _run_pipeline_generate_glb(
+            outputs, 
+            arg.mesh_simplify_ratio,
+            arg.texture_size,
+            apply_texture=arg.apply_texture,
+            output_format=arg.output_format
+        )
+        current_generation["model_url"] = f"/download/model?format={arg.output_format}"
 
-        # Clean up intermediate files, keep final model
+        update_current_generation(status=TaskStatus.COMPLETE, progress=100, message="Generation complete (from first image)")
         await cleanup_generation_files(keep_model=True)
 
-        duration = time.time() - start_time  # Calculate duration before return
-        logger.info(f"Generation completed in {duration:.2f} seconds")
+        duration = time.time() - start_time
+        logger.info(f"Multi-view generation (using first image) completed in {duration:.2f}s. Format: {arg.output_format.upper()}")
         return GenerationResponse(
             status=TaskStatus.COMPLETE,
             progress=100,
-            message="Generation complete",
-            model_url="/download/model"  # single endpoint
+            message="Generation complete (processed first image from list)",
+            model_url=current_generation["model_url"]
         )
-    except CancelledException as cex:
-        # Cancel was triggered mid-generation
-        update_current_generation( status=TaskStatus.FAILED, progress=0, message="Cancelled by user")
+    except CancelledException:
+        update_current_generation(status=TaskStatus.FAILED, progress=0, message="Cancelled by user")
         await cleanup_generation_files()
         raise HTTPException(status_code=499, detail="Generation cancelled by user")
     except Exception as e:
         error_trace = traceback.format_exc()
-        logger.error(error_trace)
+        logger.error(f"Error in /generate_multi_no_preview: {error_trace}")
         update_current_generation(status=TaskStatus.FAILED, progress=0, message=str(e))
         await cleanup_generation_files()
+        if isinstance(e, HTTPException): raise e
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         generation_lock.release()
@@ -484,34 +457,49 @@ async def process_ui_generation_request(
 ):
     """Process generation request from the UI panel and redirect to appropriate endpoint."""
     try:
-        # Extract values from simplified input format
         arg = GenerationArgForm(
-            seed = int(data.get("seed", 1234)),
-            guidance_scale = data.get("guidance_scale", 5.0),
-            num_inference_steps = int(data.get("num_inference_steps", 20)),
-            octree_resolution = int(data.get("octree_resolution", 256)),
-            num_chunks = int(data.get("num_chunks", 8000)),
-            mesh_simplify_ratio = data.get("mesh_simplify", 0.95),
-            apply_texture = data.get("apply_texture", False),
+            seed = int(data.get("seed", 123)),
+            ss_guidance_strength = float(data.get("ss_guidance_strength", 3.0)),
+            ss_sampling_steps = int(data.get("ss_sampling_steps", 50)),
+            slat_guidance_strength = float(data.get("slat_guidance_strength", 3.0)),
+            slat_sampling_steps = int(data.get("slat_sampling_steps", 6)),
+            mesh_simplify_ratio = float(data.get("mesh_simplify_ratio", 95.0)), # UI sends 0-100
+            apply_texture = bool(data.get("apply_texture", False)),
             texture_size = int(data.get("texture_size", 1024)),
-            output_format = "glb"
+            output_format = data.get("output_format", "glb") # Get output_format from UI
         )
         # Get images from input
         images_base64 = data.get("single_multi_img_input", [])
         if not images_base64:
             raise HTTPException(status_code=400, detail="No images provided")
 
-        # Always skip videos for now
-        response = await generate_multi_no_preview(
-            file_list=None,
-            image_list_base64=images_base64,
-            arg=arg
-        )
+        # For now, Hi3DGen app.py focuses on single.
+        # If images_base64 always contains one image for this path:
+        if len(images_base64) == 1:
+            response = await generate_no_preview( # Call generate_no_preview for single image
+                file=None,
+                image_base64=images_base64[0],
+                arg=arg
+            )
+        elif len(images_base64) > 1:
+             # to support multi-image through this UI endpoint eventually:
+            logger.info("UI request with multiple images, using generate_multi_no_preview.")
+            response = await generate_multi_no_preview(
+                file_list=None,
+                image_list_base64=images_base64,
+                arg=arg
+            )
+        else: # Should not happen if check above passes
+            raise HTTPException(status_code=400, detail="Image list is empty after initial check.")
+
         return response
 
+    except HTTPException as httpe: # Re-raise HTTP exceptions
+        raise httpe
     except Exception as e:
         logger.error(f"Error processing UI generation request: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Error in UI request processing: {str(e)}")
 
 
 # for example:
@@ -536,17 +524,42 @@ async def interrupt_generation():
 
 
 @router.get("/download/model")
-async def download_model():
-    """Download final 3D model (GLB)."""
-    logger.info("Client is downloading a model.")
-    model_path = file_manager.get_temp_path("model.glb")
+async def download_model(format: str = Query("glb", enum=["glb", "obj", "ply", "stl"])):
+    """Download final 3D model (GLB, OBJ, PLY, STL)."""
+    logger.info(f"Client is downloading a model in {format.upper()} format.")
+    model_filename = f"model.{format.lower()}"
+    model_path = file_manager.get_temp_path(model_filename)
+
     if not model_path.exists():
-        logger.error(f"mesh not found")
-        raise HTTPException(status_code=404, detail="Mesh not found")
+        logger.error(f"Model file {model_filename} not found at {model_path}")
+        # Try to find if any model exists, maybe format mismatch
+        found_formats = []
+        for ext in ["glb", "obj", "ply", "stl"]:
+            if file_manager.get_temp_path(f"model.{ext}").exists():
+                found_formats.append(ext)
+        if found_formats:
+            logger.error(f"Requested format {format} not found, but other formats exist: {found_formats}. Defaulting to GLB if available, or first found.")
+            if "glb" in found_formats:
+                model_path = file_manager.get_temp_path("model.glb")
+                format = "glb"
+            else:
+                format = found_formats[0]
+                model_path = file_manager.get_temp_path(f"model.{format}")
+                model_filename = f"model.{format}"
+            if not model_path.exists(): # Should not happen if found_formats is populated
+                 raise HTTPException(status_code=404, detail=f"Mesh not found. No model files available.")
+        else:
+            raise HTTPException(status_code=404, detail=f"Mesh not found. No model file {model_filename} or any other format found.")
+    media_type_map = {
+        "glb": "model/gltf-binary",
+        "obj": "text/plain", # Or model/obj
+        "ply": "application/octet-stream", # Or model/ply
+        "stl": "model/stl"
+    }
     return FileResponse(
         str(model_path),
-        media_type="model/gltf-binary",
-        filename="model.glb"
+        media_type=media_type_map.get(format, "application/octet-stream"),
+        filename=model_filename # e.g., model.glb, model.obj
     )
 
 @router.get("/download/spz-ui-layout/generation-3d-panel")
