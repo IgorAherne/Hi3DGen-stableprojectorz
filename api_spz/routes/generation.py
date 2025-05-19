@@ -96,8 +96,8 @@ def _gen_3d_validate_params(file_or_files, b64_or_b64list, arg: GenerationArgFor
     if not (1 <= arg.slat_sampling_steps <= 50):
         raise HTTPException(status_code=400, detail="Structured Latent Sampling Steps must be between 1 and 50")
 
-    if not (0 <= arg.mesh_simplify_ratio <= 100): 
-        raise HTTPException(status_code=400, detail="mesh_simplify_ratio must be between 0 and 100")
+    if not (0 <= arg.poly_count_pcnt <= 100): 
+        raise HTTPException(status_code=400, detail="poly_count_pcnt must be between 0 and 100")
     
     if arg.apply_texture:
         logger.warning("apply_texture is True, but Hi3DGen pipeline does not have integrated texturing. This option may not have an effect unless a separate texturing module is used.")
@@ -279,14 +279,14 @@ async def _run_pipeline_generate_3d(pil_input_image: Image.Image, arg: Generatio
 
 
 def normalize_meshSimplify_ratio(ratio: float) -> float:
-    """Normalize mesh_simplify_ratio to [0,1] range"""
+    """Normalize poly_count_pcnt to [0,1] range"""
     if ratio > 1.0:  # Detect [0,100] range
         return ratio / 100.0
     return ratio
 
 
 def simplify_mesh_open3d(in_mesh:trimesh.Trimesh, 
-                         mesh_simplify_ratio01: float=0.7) -> trimesh.Trimesh:
+                         poly_count_pcnt01: float=0.7) -> trimesh.Trimesh:
     """
     Simplifies trimesh using Open3D by a reduction percentage (0.0-1.0).
     E.g., reduct_pct01=0.7 means target is 30% of original faces.
@@ -297,22 +297,22 @@ def simplify_mesh_open3d(in_mesh:trimesh.Trimesh,
         return in_mesh
 
     # reduct_pct: 0.0 = no reduction, <1.0. E.g. 0.7 means keep 30%
-    if not (0.0 < mesh_simplify_ratio01 < 1.0):
-        print(f"Simplify skip: reduct_pct {mesh_simplify_ratio01:.2f} out of (0,1) range.")
+    if not (0.0 < poly_count_pcnt01 < 1.0):
+        print(f"Simplify skip: reduct_pct {poly_count_pcnt01:.2f} out of (0,1) range.")
         return in_mesh
 
     current_tris = len(in_mesh.faces)
     if current_tris == 0: return in_mesh # No faces to simplify
 
     # Calculate target triangles: keep (1 - reduct_pct) portion
-    target_tris = int(current_tris * (1.0 - mesh_simplify_ratio01))
+    target_tris = int(current_tris * (1.0 - poly_count_pcnt01))
     target_tris = max(1, target_tris) # Ensure at least 1 triangle if original had faces
 
     if target_tris >= current_tris: # No actual reduction
         print(f"Simplify skip: Target {target_tris} >= current {current_tris}.")
         return in_mesh
 
-    print(f"Simplifying: {current_tris} faces -> ~{target_tris} faces ({ (1.0-mesh_simplify_ratio01)*100:.0f}% original).")
+    print(f"Simplifying: {current_tris} faces -> ~{target_tris} faces ({ (1.0-poly_count_pcnt01)*100:.0f}% original).")
     
     o3d_m = o3d.geometry.TriangleMesh() # Convert to Open3D format
     o3d_m.vertices = o3d.utility.Vector3dVector(in_mesh.vertices)
@@ -431,7 +431,7 @@ def unwrap_mesh_with_xatlas(input_mesh: trimesh.Trimesh, atlas_resolution:int=10
 
 async def _run_pipeline_generate_glb(
     outputs: Dict,             # Expected to contain 'mesh': [trimesh_object]
-    mesh_simplify_ratio: float, # Received from args (0-100)
+    poly_count_pcnt: float, # Received from args (0-100)
     texture_size: int,          # Used as pack_options.resolution for xatlas
     apply_texture: bool = False,# Placeholder, not used by Hi3DGen core
     output_format: str = "glb",
@@ -456,8 +456,8 @@ async def _run_pipeline_generate_glb(
 
             logger.info(f"Received mesh for export with {len(raw_mesh_trimesh.faces)} faces and {len(raw_mesh_trimesh.vertices)} vertices.")
 
-            # Convert mesh_simplify_ratio (0-100 from UI, % to reduce by) to reduct_pct (0.0-1.0 for simplify_mesh_open3d)
-            reduction_percentage_float = normalize_meshSimplify_ratio(mesh_simplify_ratio)
+            # Convert poly_count_pcnt (0-100 from UI, % to reduce by) to reduct_pct (0.0-1.0 for simplify_mesh_open3d)
+            reduction_percentage_float = normalize_meshSimplify_ratio(poly_count_pcnt)
             mesh_to_export = simplify_mesh_open3d(raw_mesh_trimesh, reduction_percentage_float)
 
             if not apply_texture or output_format.lower() == "stl": # STL doesn't support UVs
@@ -549,7 +549,7 @@ async def generate_no_preview(
         update_current_generation(progress=95, message=f"Generating {arg.output_format.upper()} file...")
         await _run_pipeline_generate_glb(
             outputs, 
-            arg.mesh_simplify_ratio, 
+            arg.poly_count_pcnt, 
             arg.texture_size,        
             apply_texture=arg.apply_texture, 
             output_format=arg.output_format,
@@ -626,7 +626,7 @@ async def generate_multi_no_preview(
         update_current_generation(progress=70, message=f"Generating {arg.output_format.upper()} file...")
         await _run_pipeline_generate_glb(
             outputs, 
-            arg.mesh_simplify_ratio,
+            arg.poly_count_pcnt,
             arg.texture_size,
             apply_texture=arg.apply_texture,
             output_format=arg.output_format,
@@ -672,7 +672,7 @@ async def process_ui_generation_request(
             ss_sampling_steps = int(data.get("ss_sampling_steps", 50)),
             slat_guidance_strength = float(data.get("slat_guidance_strength", 3.0)),
             slat_sampling_steps = int(data.get("slat_sampling_steps", 6)),
-            mesh_simplify_ratio = float(data.get("mesh_simplify_ratio", 95.0)), # UI sends 0-100
+            poly_count_pcnt = float(data.get("poly_count_pcnt", 95.0)), # UI sends 0-100
             apply_texture = bool(data.get("apply_texture", False)),
             texture_size = int(data.get("texture_size", 1024)),
             output_format = data.get("output_format", "glb") # Get output_format from UI

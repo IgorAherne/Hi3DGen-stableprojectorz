@@ -131,7 +131,7 @@ def preprocess_image(image):
 
 
 def simplify_mesh_open3d(in_mesh:trimesh.Trimesh, 
-                         mesh_simplify_ratio01: float=0.7) -> trimesh.Trimesh:
+                         poly_count_pcnt: float=0.7) -> trimesh.Trimesh:
     """
     Simplifies trimesh using Open3D by a reduction percentage (0.0-1.0).
     E.g., reduct_pct01=0.7 means target is 30% of original faces.
@@ -142,22 +142,22 @@ def simplify_mesh_open3d(in_mesh:trimesh.Trimesh,
         return in_mesh
 
     # reduct_pct: 0.0 = no reduction, <1.0. E.g. 0.7 means keep 30%
-    if not (0.0 < mesh_simplify_ratio01 < 1.0):
-        print(f"Simplify skip: reduct_pct {mesh_simplify_ratio01:.2f} out of (0,1) range.")
+    if not (0.0 < poly_count_pcnt < 1.0):
+        print(f"Simplify skip: reduct_pct {poly_count_pcnt:.2f} out of (0,1) range.")
         return in_mesh
 
     current_tris = len(in_mesh.faces)
     if current_tris == 0: return in_mesh # No faces to simplify
 
     # Calculate target triangles: keep (1 - reduct_pct) portion
-    target_tris = int(current_tris * (1.0 - mesh_simplify_ratio01))
+    target_tris = int(current_tris * (1.0 - poly_count_pcnt))
     target_tris = max(1, target_tris) # Ensure at least 1 triangle if original had faces
 
     if target_tris >= current_tris: # No actual reduction
         print(f"Simplify skip: Target {target_tris} >= current {current_tris}.")
         return in_mesh
 
-    print(f"Simplifying: {current_tris} faces -> ~{target_tris} faces ({ (1.0-mesh_simplify_ratio01)*100:.0f}% original).")
+    print(f"Simplifying: {current_tris} faces -> ~{target_tris} faces ({ (1.0-poly_count_pcnt)*100:.0f}% original).")
     
     o3d_m = o3d.geometry.TriangleMesh() # Convert to Open3D format
     o3d_m.vertices = o3d.utility.Vector3dVector(in_mesh.vertices)
@@ -277,7 +277,7 @@ def unwrap_mesh_with_xatlas(input_mesh: trimesh.Trimesh) -> trimesh.Trimesh:
 def generate_3d(image, seed=-1,  
                 ss_guidance_strength=3, ss_sampling_steps=50,
                 slat_guidance_strength=3, slat_sampling_steps=6,
-                mesh_simplify_ratio01: float = 0.7):
+                poly_count_pcnt: float = 0.7):
     # global hi3dgen_pipeline # normal_predictor is now function-local
 
     if image is None: 
@@ -338,7 +338,7 @@ def generate_3d(image, seed=-1,
         mesh_path_glb = os.path.join(output_dir, "mesh.glb")
 
         raw_mesh_trimesh = outputs['mesh'][0].to_trimesh(transform_pose=True)
-        mesh_for_uv_unwrap = simplify_mesh_open3d(raw_mesh_trimesh, mesh_simplify_ratio01)
+        mesh_for_uv_unwrap = simplify_mesh_open3d(raw_mesh_trimesh, poly_count_pcnt)
         
         # Call the new UV unwrapping function
         unwrapped_mesh_trimesh = unwrap_mesh_with_xatlas(mesh_for_uv_unwrap )
