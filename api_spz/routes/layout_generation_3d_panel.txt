@@ -28,7 +28,7 @@ vgroup padl=4 padr=4 spacing=8 flexibleWidth=1
         hgroup spacing=8 
             hgroup bg.color=(255,255,255,10) bg.ppu=10 padl=6 flexibleWidth=2 preferredWidth=100
                 space  flexibleHeight=1  flexibleWidth=1
-                slider code_name=(poly_count)  visible_name=(poly\ncount)  min=0  max=100  default=15  show_n_decimals=0  flexibleHeight=1  
+                slider code_name=(poly_count_pcnt)  visible_name=(poly\ncount)  min=0  max=100  default=80  show_n_decimals=0  flexibleHeight=1  
                 space  flexibleHeight=1   flexibleWidth=1  minWidth=10 
 
             vgroup  padl=10 padr=10 padt=27 padb=25 bg.color=(255,255,255,10) bg.ppu=10  flexibleWidth=1 spacing=8 preferredHeight=60
