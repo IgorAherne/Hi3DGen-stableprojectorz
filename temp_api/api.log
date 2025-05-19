@@ -620,3 +620,81 @@ ModuleNotFoundError: No module named 'triton'
 2025-05-19 04:52:29 | INFO | stable3dgen_api | Added filter to reduce Uvicorn access log noise for specific endpoints.
 2025-05-19 04:52:29 | INFO | stable3dgen_api | Now in StableProjectorz, enter the 3D mode, click on the connection button and enter 127.0.0.1:7960
 2025-05-19 04:52:43 | INFO | stable3dgen_api | Request: /generate_no_preview, Output format: GLB
+2025-05-19 04:53:54 | INFO | stable3dgen_api | Using weights directory: C:\_myDrive\repos\Stable3DGen-stableprojectorz\code\weights
+2025-05-19 04:53:54 | INFO | stable3dgen_api | Server lifespan startup sequence initiated.
+2025-05-19 04:53:54 | INFO | stable3dgen_api | Starting model caching process...
+2025-05-19 04:53:54 | INFO | stable3dgen_api | Processing Stable-X/trellis-normal-v0-1 for caching into C:\_myDrive\repos\Stable3DGen-stableprojectorz\code\weights\models--Stable-X--trellis-normal-v0-1...
+2025-05-19 04:53:55 | INFO | stable3dgen_api |   Found 11 files in Stable-X/trellis-normal-v0-1. Starting download/verification...
+2025-05-19 04:53:55 | INFO | stable3dgen_api |   [1/11] Processing file: .gitattributes
+2025-05-19 04:53:55 | INFO | stable3dgen_api |   [2/11] Processing file: README.md
+2025-05-19 04:53:55 | INFO | stable3dgen_api |   [3/11] Processing file: ckpts/slat_dec_mesh_swin8_B_64l8m256c_fp16.json
+2025-05-19 04:53:55 | INFO | stable3dgen_api |   [4/11] Processing file: ckpts/slat_dec_mesh_swin8_B_64l8m256c_fp16.safetensors
+2025-05-19 04:53:55 | INFO | stable3dgen_api |   [5/11] Processing file: ckpts/slat_flow_normal_dit_L_64l8p2_fp16.json
+2025-05-19 04:53:56 | INFO | stable3dgen_api |   [6/11] Processing file: ckpts/slat_flow_normal_dit_L_64l8p2_fp16.safetensors
+2025-05-19 04:53:56 | INFO | stable3dgen_api |   [7/11] Processing file: ckpts/ss_dec_conv3d_16l8_fp16.json
+2025-05-19 04:53:56 | INFO | stable3dgen_api |   [8/11] Processing file: ckpts/ss_dec_conv3d_16l8_fp16.safetensors
+2025-05-19 04:53:56 | INFO | stable3dgen_api |   [9/11] Processing file: ckpts/ss_flow_normal_dit_L_16l8_fp16.json
+2025-05-19 04:53:57 | INFO | stable3dgen_api |   [10/11] Processing file: ckpts/ss_flow_normal_dit_L_16l8_fp16.safetensors
+2025-05-19 04:53:57 | INFO | stable3dgen_api |   [11/11] Processing file: pipeline.json
+2025-05-19 04:53:57 | INFO | stable3dgen_api |   Finished processing Stable-X/trellis-normal-v0-1.
+2025-05-19 04:53:57 | INFO | stable3dgen_api | Processing Stable-X/yoso-normal-v1-8-1 for caching into C:\_myDrive\repos\Stable3DGen-stableprojectorz\code\weights\models--Stable-X--yoso-normal-v1-8-1...
+2025-05-19 04:53:57 | INFO | stable3dgen_api |   Found 10 files in Stable-X/yoso-normal-v1-8-1. Starting download/verification...
+2025-05-19 04:53:57 | INFO | stable3dgen_api |   [1/10] Processing file: .gitattributes
+2025-05-19 04:53:57 | INFO | stable3dgen_api |   [2/10] Processing file: README.md
+2025-05-19 04:53:57 | INFO | stable3dgen_api |   [3/10] Processing file: controlnet/config.json
+2025-05-19 04:53:58 | INFO | stable3dgen_api |   [4/10] Processing file: controlnet/controlnetvae.py
+2025-05-19 04:53:58 | INFO | stable3dgen_api |   [5/10] Processing file: controlnet/diffusion_pytorch_model.fp16.safetensors
+2025-05-19 04:53:58 | INFO | stable3dgen_api |   [6/10] Processing file: model_index.json
+2025-05-19 04:53:58 | INFO | stable3dgen_api |   [7/10] Processing file: unet/config.json
+2025-05-19 04:53:58 | INFO | stable3dgen_api |   [8/10] Processing file: unet/diffusion_pytorch_model.fp16.safetensors
+2025-05-19 04:53:59 | INFO | stable3dgen_api |   [9/10] Processing file: vae/config.json
+2025-05-19 04:53:59 | INFO | stable3dgen_api |   [10/10] Processing file: vae/diffusion_pytorch_model.fp16.safetensors
+2025-05-19 04:53:59 | INFO | stable3dgen_api |   Finished processing Stable-X/yoso-normal-v1-8-1.
+2025-05-19 04:53:59 | INFO | stable3dgen_api | Processing ZhengPeng7/BiRefNet for caching into C:\_myDrive\repos\Stable3DGen-stableprojectorz\code\weights\models--ZhengPeng7--BiRefNet...
+2025-05-19 04:53:59 | INFO | stable3dgen_api |   Found 9 files in ZhengPeng7/BiRefNet. Starting download/verification...
+2025-05-19 04:53:59 | INFO | stable3dgen_api |   [1/9] Processing file: .gitattributes
+2025-05-19 04:53:59 | INFO | stable3dgen_api |   [2/9] Processing file: .gitignore
+2025-05-19 04:54:00 | INFO | stable3dgen_api |   [3/9] Processing file: BiRefNet_config.py
+2025-05-19 04:54:00 | INFO | stable3dgen_api |   [4/9] Processing file: README.md
+2025-05-19 04:54:00 | INFO | stable3dgen_api |   [5/9] Processing file: birefnet.py
+2025-05-19 04:54:00 | INFO | stable3dgen_api |   [6/9] Processing file: config.json
+2025-05-19 04:54:00 | INFO | stable3dgen_api |   [7/9] Processing file: handler.py
+2025-05-19 04:54:01 | INFO | stable3dgen_api |   [8/9] Processing file: model.safetensors
+2025-05-19 04:54:01 | INFO | stable3dgen_api |   [9/9] Processing file: requirements.txt
+2025-05-19 04:54:01 | INFO | stable3dgen_api |   Finished processing ZhengPeng7/BiRefNet.
+2025-05-19 04:54:01 | INFO | stable3dgen_api | Model caching process completed.
+2025-05-19 04:54:01 | INFO | stable3dgen_api | Resolved Hi3DGen model ID 'Stable-X/trellis-normal-v0-1' to local cache: C:\_myDrive\repos\Stable3DGen-stableprojectorz\code\weights\models--Stable-X--trellis-normal-v0-1
+2025-05-19 04:54:01 | INFO | stable3dgen_api | Initializing Hi3DGen state. Preferred active device: cuda. Initial load to CPU.
+2025-05-19 04:54:01 | INFO | stable3dgen_api | Pipeline path: 'C:\_myDrive\repos\Stable3DGen-stableprojectorz\code\weights\models--Stable-X--trellis-normal-v0-1', NormalPredictor: 'hugoycj/StableNormal/StableNormal_turbo'
+2025-05-19 04:54:01 | INFO | stable3dgen_api | Loading Hi3DGenPipeline from 'C:\_myDrive\repos\Stable3DGen-stableprojectorz\code\weights\models--Stable-X--trellis-normal-v0-1' to CPU...
+2025-05-19 04:54:02 | WARNING | xformers | A matching Triton is not available, some optimizations will not be enabled
+Traceback (most recent call last):
+  File "C:\_myDrive\repos\Stable3DGen-stableprojectorz\code\venv\Lib\site-packages\xformers\__init__.py", line 57, in _is_triton_available
+    import triton  # noqa
+    ^^^^^^^^^^^^^
+ModuleNotFoundError: No module named 'triton'
+2025-05-19 04:54:20 | INFO | dinov2 | using MLP layer as FFN
+2025-05-19 04:54:22 | INFO | stable3dgen_api | Hi3DGenPipeline loaded to CPU and configured.
+2025-05-19 04:54:22 | INFO | stable3dgen_api | Loading Normal Predictor 'StableNormal_turbo' from 'hugoycj/StableNormal' (source: github) to CPU. Cache dir: C:\_myDrive\repos\Stable3DGen-stableprojectorz\code\weights
+2025-05-19 04:54:29 | INFO | stable3dgen_api | Normal Predictor loaded to CPU and configured.
+2025-05-19 04:54:29 | INFO | stable3dgen_api | Hi3DGenState initialization successful. Models are on CPU.
+2025-05-19 04:54:29 | INFO | stable3dgen_api | Initialized Hi3DGen pipeline from 'C:\_myDrive\repos\Stable3DGen-stableprojectorz\code\weights\models--Stable-X--trellis-normal-v0-1' and normal predictor 'hugoycj/StableNormal/StableNormal_turbo' on cuda
+2025-05-19 04:54:29 | INFO | stable3dgen_api | Added filter to reduce Uvicorn access log noise for specific endpoints.
+2025-05-19 04:54:29 | INFO | stable3dgen_api | Now in StableProjectorz, enter the 3D mode, click on the connection button and enter 127.0.0.1:7960
+2025-05-19 04:54:48 | INFO | stable3dgen_api | Request: /generate_no_preview, Output format: GLB
+2025-05-19 04:54:48 | WARNING | stable3dgen_api | apply_texture is True, but Hi3DGen pipeline does not have integrated texturing. This option may not have an effect unless a separate texturing module is used.
+2025-05-19 04:54:48 | INFO | stable3dgen_api | Normal Prediction: Preparing on device 'cuda'...
+2025-05-19 04:54:48 | INFO | stable3dgen_api | Preprocessing input image for normal map generation (on CPU)...
+2025-05-19 04:54:49 | INFO | stable3dgen_api | Generating normal map...
+2025-05-19 04:55:15 | INFO | stable3dgen_api | Normal map generated.
+2025-05-19 04:55:16 | INFO | stable3dgen_api | Normal Prediction stage finished, model returned to CPU.
+2025-05-19 04:55:16 | INFO | stable3dgen_api | Hi3DGen Pipeline: Preparing on device 'cuda'...
+2025-05-19 04:56:26 | INFO | stable3dgen_api | Running Hi3DGen pipeline...
+2025-05-19 05:16:12 | INFO | stable3dgen_api | Converting to Trimesh object...
+2025-05-19 05:16:12 | INFO | stable3dgen_api | Trimesh object created.
+2025-05-19 05:16:29 | INFO | stable3dgen_api | Hi3DGen Pipeline stage finished, model returned to CPU.
+2025-05-19 05:16:29 | INFO | stable3dgen_api | Received mesh for export with 1051950 faces and 526039 vertices.
+2025-05-19 05:20:17 | WARNING | stable3dgen_api | apply_texture is True, but Hi3DGen pipeline does not have integrated texturing. This option will be ignored for model export unless a separate texturing module is implemented and called here.
+2025-05-19 05:20:17 | INFO | stable3dgen_api | Exporting GLB model to temp\current_generation\model.glb
+2025-05-19 05:20:17 | INFO | stable3dgen_api | Exported GLB model to temp\current_generation\model.glb in 227.94s. File size: 21400.65 KB
+2025-05-19 05:20:17 | INFO | stable3dgen_api | Generation completed in 1528.24s. Format: GLB

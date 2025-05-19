@@ -286,7 +286,7 @@ def normalize_meshSimplify_ratio(ratio: float) -> float:
 
 
 def simplify_mesh_open3d(in_mesh:trimesh.Trimesh, 
-                         poly_count_pcnt01: float=0.7) -> trimesh.Trimesh:
+                         poly_count_pcnt01: float=0.5) -> trimesh.Trimesh:
     """
     Simplifies trimesh using Open3D by a reduction percentage (0.0-1.0).
     E.g., reduct_pct01=0.7 means target is 30% of original faces.
@@ -296,7 +296,7 @@ def simplify_mesh_open3d(in_mesh:trimesh.Trimesh,
         print("Simplify ERR: Invalid input type.")
         return in_mesh
 
-    # reduct_pct: 0.0 = no reduction, <1.0. E.g. 0.7 means keep 30%
+    # reduct_pct: 0.0 = no reduction, <1.0. E.g. 0.5 means keep 30%
     if not (0.0 < poly_count_pcnt01 < 1.0):
         print(f"Simplify skip: reduct_pct {poly_count_pcnt01:.2f} out of (0,1) range.")
         return in_mesh
