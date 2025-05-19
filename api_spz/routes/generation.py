@@ -544,9 +544,9 @@ async def generate_no_preview(
 
         update_current_generation(status=TaskStatus.PROCESSING, progress=10, message="Generating 3D structure (incl. normal map)...")
         outputs = await _run_pipeline_generate_3d(single_pil_image, arg)
-        update_current_generation(progress=50, message="Trimesh object generated, preparing final model file...", outputs=outputs)
+        update_current_generation(progress=80, message="Trimesh object generated, preparing final model file...", outputs=outputs)
 
-        update_current_generation(progress=70, message=f"Generating {arg.output_format.upper()} file...")
+        update_current_generation(progress=95, message=f"Generating {arg.output_format.upper()} file...")
         await _run_pipeline_generate_glb(
             outputs, 
             arg.mesh_simplify_ratio, 

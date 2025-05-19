@@ -145,6 +145,26 @@ def cache_weights_api(weights_dir_path: Path) -> dict:
     return cached_paths_map
 
 
+def reduce_uvicorn_logs():
+    try:
+        uvicorn_access_logger = logging.getLogger("uvicorn.access")
+        class NoisyRequestsFilter(logging.Filter):
+            def filter(self, record: logging.LogRecord) -> bool:
+                message = record.getMessage()
+                # Add paths you want to silence from access logs
+                if "/ping HTTP/1.1" in message or \
+                   "/download/spz-ui-layout/generation-3d-panel" in message or \
+                   "/info/supported_operations" in message:
+                    return False
+                return True
+        # Check if filter already added to prevent duplicates if lifespan runs multiple times (e.g. reload)
+        if not any(isinstance(f, NoisyRequestsFilter) for f in uvicorn_access_logger.filters):
+            uvicorn_access_logger.addFilter(NoisyRequestsFilter())
+            logger.info("Added filter to reduce Uvicorn access log noise for specific endpoints.")
+    except Exception as e:
+        logger.warning(f"Could not apply Uvicorn access log filter: {e}")
+
+
 # Define lifespan context manager for startup/shutdown events
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI): # Renamed app to app_instance to avoid conflict
@@ -184,7 +204,7 @@ async def lifespan(app_instance: FastAPI): # Renamed app to app_instance to avoi
         device=final_device_name
     )
     logger.info(f"Initialized Hi3DGen pipeline from '{resolved_hi3dgen_model_path}' and normal predictor '{args.normal_predictor_repo}/{args.normal_predictor_model}' on {final_device_name}")
-    
+    reduce_uvicorn_logs()
     print("\n" + "="*50)
     print(f"Stable3DGen (Hi3DGen) - StableProjectorz API Server v1.0.0")
     print(f"Server is active and listening on {args.host}:{args.port}")

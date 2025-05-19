@@ -33,7 +33,7 @@ vgroup padl=4 padr=4 spacing=8 flexibleWidth=1
 
             vgroup  padl=10 padr=10 padt=27 padb=25 bg.color=(255,255,255,10) bg.ppu=10  flexibleWidth=1 spacing=8 preferredHeight=60
                 go rect.offsetMin=(2,0)  minHeight=30  preferredHeight=30  flexibleWidth=1  preferredWidth=90
-                    toggle  code_name=(apply_texture)  visible_name=(uv\nunwrap)  default=false 
+                    toggle  code_name=(apply_texture)  visible_name=(uv\nunwrap)  default=true 
             
             go bg.color=(255,255,255,10) bg.ppu=10  flexibleWidth=1 preferredHeight=62  flexibleWidth=3
                 int_horizontal  code_name=(seed)  visible_name=(seed)  min=-2147483647  max=2147483647  default=-1  as_seed=true  rect.anchors=(0,1,1,1)  rect.offsetMin=(0,-60)
