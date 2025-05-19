@@ -305,7 +305,7 @@ def simplify_mesh_open3d(in_mesh:trimesh.Trimesh,
     if current_tris == 0: return in_mesh # No faces to simplify
 
     # Calculate target triangles: keep (1 - reduct_pct) portion
-    target_tris = int(current_tris * (1.0 - poly_count_pcnt01))
+    target_tris = int(current_tris * poly_count_pcnt01)
     target_tris = max(1, target_tris) # Ensure at least 1 triangle if original had faces
 
     if target_tris >= current_tris: # No actual reduction

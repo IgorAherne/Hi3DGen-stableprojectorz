@@ -292,7 +292,7 @@ def generate_from_image(image_path: str):
             'ss_sampling_steps': 50,
             'slat_guidance_strength': 3.0,
             'slat_sampling_steps': 6,
-            'mesh_simplify_ratio': 95.0,
+            'poly_count_pcnt': 80.0,
             'apply_texture': True,      # Set to True to get UV unwrapping
             'texture_size': 1024,
             'output_format': 'glb'
@@ -354,7 +354,7 @@ def generate_from_image(image_path: str):
             'ss_sampling_steps': 50,
             'slat_guidance_strength': 3.0,
             'slat_sampling_steps': 6,
-            'mesh_simplify_ratio': 95.0,
+            'poly_count_pcnt': 80.0,
             'apply_texture': True,      # Set to True to get UV unwrapping
             'texture_size': 1024,       # Make sure this is included if relevant to apply_texture
             'output_format': 'glb'
@@ -461,8 +461,8 @@ def generate_from_image(image_path: str):
                         <p>Structured Latent Sampling Steps.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">mesh_simplify_ratio</span>: float (default: 95.0, range: >0-100)
-                        <p>Mesh simplification ratio (0-100). Note: Simplification currently not applied in this API flow.</p>
+                        <span class="parameter-name">poly_count_pcnt</span>: float (default: 95.0, range: >0-100)
+                        <p>% of how many polygons to keep (0-100).</p>
                     </div>
                     <div class="parameter">
                         <span class="parameter-name">apply_texture</span>: boolean (default: false)
@@ -510,8 +510,8 @@ def generate_from_image(image_path: str):
                         <p>Structured Latent Sampling Steps.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">mesh_simplify_ratio</span>: float (default: 95.0, range: >0-100)
-                        <p>Mesh simplification ratio (0-100). Note: Simplification currently not applied in this API flow.</p>
+                        <span class="parameter-name">poly_count_pcnt</span>: float (default: 95.0, range: >0-100)
+                        <p>% of how many polygons to keep (0-100).</p>
                     </div>
                     <div class="parameter">
                         <span class="parameter-name">apply_texture</span>: boolean (default: false)
@@ -614,8 +614,8 @@ def generate_from_image(image_path: str):
                         <p>Structured Latent Sampler: Number of sampling steps.</p>
                     </div>
                     <div class="parameter">
-                        <span class="parameter-name">mesh_simplify_ratio</span>: float (default: 95.0, range: >0.0-100.0)
-                        <p>Target mesh simplification ratio (percentage of faces to keep, e.g., 95.0 means keep 95%). Note: Mesh simplification is currently NOT APPLIED in this API flow after the main Hi3DGen pipeline, so this parameter may not have a visible effect on the final output mesh complexity from this API.</p>
+                        <span class="parameter-name">poly_count_pcnt</span>: float (default: 95.0, range: >0.0-100.0)
+                        <p>% of how many polygons to keep (0-100)</p>
                     </div>
                     <div class="parameter">
                         <span class="parameter-name">apply_texture</span>: boolean (default: false)
