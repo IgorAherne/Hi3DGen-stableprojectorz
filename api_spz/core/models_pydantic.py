@@ -21,7 +21,7 @@ class GenerationArgForm:
         slat_guidance_strength: float = Form(3.0),
         slat_sampling_steps: int = Form(6),
         # Post-processing
-        mesh_simplify_ratio: float = Form(95.0), # UI sends 0-100, will be normalized to 0.0-1.0
+        mesh_simplify_ratio: float = Form(0.7), # UI sends 0-100, will be normalized to 0.0-1.0
         # Output format
         output_format: str = Form("glb"),
         # Texturing - Hi3DGen does not seem to have an integrated texturing pipeline.

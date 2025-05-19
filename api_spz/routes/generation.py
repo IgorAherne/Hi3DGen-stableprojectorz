@@ -12,6 +12,7 @@ from fastapi.responses import FileResponse
 from PIL import Image
 import torch
 import trimesh
+import open3d as o3d
 import xatlas
 
 from api_spz.core.exceptions import CancelledException
@@ -95,8 +96,8 @@ def _gen_3d_validate_params(file_or_files, b64_or_b64list, arg: GenerationArgFor
     if not (1 <= arg.slat_sampling_steps <= 50):
         raise HTTPException(status_code=400, detail="Structured Latent Sampling Steps must be between 1 and 50")
 
-    if not (0 < arg.mesh_simplify_ratio <= 100): 
-        raise HTTPException(status_code=400, detail="mesh_simplify_ratio must be between 0 (exclusive) and 100 (inclusive)")
+    if not (0 <= arg.mesh_simplify_ratio <= 100): 
+        raise HTTPException(status_code=400, detail="mesh_simplify_ratio must be between 0 and 100")
     
     if arg.apply_texture:
         logger.warning("apply_texture is True, but Hi3DGen pipeline does not have integrated texturing. This option may not have an effect unless a separate texturing module is used.")
@@ -284,10 +285,153 @@ def normalize_meshSimplify_ratio(ratio: float) -> float:
     return ratio
 
 
+def simplify_mesh_open3d(in_mesh:trimesh.Trimesh, 
+                         mesh_simplify_ratio01: float=0.7) -> trimesh.Trimesh:
+    """
+    Simplifies trimesh using Open3D by a reduction percentage (0.0-1.0).
+    E.g., reduct_pct01=0.7 means target is 30% of original faces.
+    Returns original mesh on error, invalid input, or if no reduction is practical.
+    """
+    if not isinstance(in_mesh, trimesh.Trimesh): # Basic type check
+        print("Simplify ERR: Invalid input type.")
+        return in_mesh
+
+    # reduct_pct: 0.0 = no reduction, <1.0. E.g. 0.7 means keep 30%
+    if not (0.0 < mesh_simplify_ratio01 < 1.0):
+        print(f"Simplify skip: reduct_pct {mesh_simplify_ratio01:.2f} out of (0,1) range.")
+        return in_mesh
+
+    current_tris = len(in_mesh.faces)
+    if current_tris == 0: return in_mesh # No faces to simplify
+
+    # Calculate target triangles: keep (1 - reduct_pct) portion
+    target_tris = int(current_tris * (1.0 - mesh_simplify_ratio01))
+    target_tris = max(1, target_tris) # Ensure at least 1 triangle if original had faces
+
+    if target_tris >= current_tris: # No actual reduction
+        print(f"Simplify skip: Target {target_tris} >= current {current_tris}.")
+        return in_mesh
+
+    print(f"Simplifying: {current_tris} faces -> ~{target_tris} faces ({ (1.0-mesh_simplify_ratio01)*100:.0f}% original).")
+    
+    o3d_m = o3d.geometry.TriangleMesh() # Convert to Open3D format
+    o3d_m.vertices = o3d.utility.Vector3dVector(in_mesh.vertices)
+    o3d_m.triangles = o3d.utility.Vector3iVector(in_mesh.faces)
+
+    try:
+        # Quadric decimation is generally a good default
+        simplified_o3d_m = o3d_m.simplify_quadric_decimation(target_number_of_triangles=target_tris)
+        
+        s_verts = np.asarray(simplified_o3d_m.vertices)
+        s_faces = np.asarray(simplified_o3d_m.triangles)
+
+        # Critical: check for empty mesh post-simplification
+        if s_faces.size == 0 and current_tris > 0:
+            print("Simplify WARN: Empty mesh result. Reverting.")
+            return in_mesh
+        
+        # Convert back to Trimesh, process=True recomputes normals
+        return trimesh.Trimesh(vertices=s_verts, faces=s_faces, process=True)
+    except Exception as e:
+        print(f"Simplify ERR: Open3D failed ({e}). Reverting.")
+        traceback.print_exc()
+        return in_mesh # Fallback to original mesh
+
+
+def unwrap_mesh_with_xatlas(input_mesh: trimesh.Trimesh, atlas_resolution:int=1024) -> trimesh.Trimesh:
+    """
+    Unwraps a Trimesh object using xatlas and returns a new Trimesh object
+    with generated UVs.
+    """
+    print("UV Unwrapping with xatlas: Starting process...")
+
+    input_vertices_orig = input_mesh.vertices.astype(np.float32) 
+    input_faces_orig = input_mesh.faces.astype(np.uint32)      
+    vertex_normals_from_trimesh = input_mesh.vertex_normals 
+    input_normals_orig = np.ascontiguousarray(vertex_normals_from_trimesh, dtype=np.float32)
+
+    print(f"  Input mesh: {input_vertices_orig.shape[0]} vertices, {input_faces_orig.shape[0]} faces.")
+
+    atlas = xatlas.Atlas()
+    atlas.add_mesh(input_vertices_orig, input_faces_orig, input_normals_orig) 
+
+    # Configure xatlas ChartOptions
+    chart_options = xatlas.ChartOptions()
+    
+    # Allow more stretch/distortion within a chart. Default is 2.0.
+    chart_options.max_cost = 8.0 # keep it high.
+    
+    # Reduce the penalty for creating seams along edges with differing normals.
+    # Default is 4.0. Lower values make xatlas less likely to cut based on normal changes.
+    chart_options.normal_seam_weight = 1.0 # Significantly reduced from default 4.0
+    
+    # chart_options.straightness_weight = 3.0 # Default 6.0; lower might allow less straight chart boundaries.
+    # chart_options.roundness_weight = 0.005 # Default 0.01
+
+    # Configure xatlas PackOptions
+    pack_options = xatlas.PackOptions()
+    pack_options.resolution = atlas_resolution 
+    pack_options.padding = 2
+
+    print(f"  Running xatlas.generate() with ChartOptions(max_cost={chart_options.max_cost:.2f}, normal_seam_weight={chart_options.normal_seam_weight:.2f}) and PackOptions(resolution={pack_options.resolution}, padding={pack_options.padding})...")
+    atlas.generate(chart_options=chart_options, pack_options=pack_options) 
+    print(f"  xatlas generated atlas with dimensions: width={atlas.width}, height={atlas.height}")
+    
+    # --- xatlas output processing ---
+    # Important Note on xatlas-python's get_mesh() behavior for meshes added via add_mesh():
+    # The first returned array (v_out_xref_data) is NOT new spatial vertex coordinates.
+    # It's an array of 'cross-reference' indices (uint32) pointing to the ORIGINAL input vertices.
+    # For each new vertex created by xatlas due to UV seam splitting, this xref tells us
+    # which original vertex its spatial position should be copied from.
+    v_out_xref_data, f_out_indices, uv_coords_from_xatlas = atlas.get_mesh(0)
+    
+    num_new_vertices = uv_coords_from_xatlas.shape[0]
+    if v_out_xref_data.shape == (num_new_vertices,): 
+        xref_indices = v_out_xref_data.astype(np.uint32) 
+        if np.any(xref_indices >= input_vertices_orig.shape[0]) or np.any(xref_indices < 0):
+             raise ValueError("Invalid xref values from xatlas - out of bounds for original input vertices.")
+        final_vertices_spatial = input_vertices_orig[xref_indices]
+    elif v_out_xref_data.shape == (num_new_vertices, 3): 
+        print("  Warning: xatlas.get_mesh() returned 3D vertex data directly, which is unexpected for add_mesh workflow.")
+        final_vertices_spatial = v_out_xref_data.astype(np.float32)
+    else:
+        raise ValueError(f"Unexpected shape for vertex/xref data from xatlas.get_mesh: {v_out_xref_data.shape}.")
+
+    # --- UV Handling (remains the same as before) ---
+    final_uvs = uv_coords_from_xatlas.astype(np.float32)
+    if np.any(final_uvs > 1.5): 
+        print("  UVs appear to be in pixel coordinates. Normalizing...")
+        if atlas.width > 0 and atlas.height > 0: 
+            final_uvs /= np.array([atlas.width, atlas.height], dtype=np.float32)
+        else:
+            print("  WARNING: Atlas width/height is 0, cannot normalize pixel UVs. Using unnormalized.")
+    else:
+        min_uv = final_uvs.min(axis=0) if final_uvs.size > 0 else "N/A"
+        max_uv = final_uvs.max(axis=0) if final_uvs.size > 0 else "N/A"
+        print(f"  UVs appear to be normalized. Min: {min_uv}, Max: {max_uv}")
+    
+    output_mesh = trimesh.Trimesh(vertices=final_vertices_spatial, faces=f_out_indices, process=False) 
+    
+    if final_uvs.shape != (final_vertices_spatial.shape[0], 2):
+        raise ValueError(f"Shape mismatch for final UVs before Trimesh assignment.")
+
+    material = trimesh.visual.material.PBRMaterial(name='defaultXatlasMat')
+    output_mesh.visual = trimesh.visual.TextureVisuals(uv=final_uvs, material=material)
+    
+    if hasattr(output_mesh.visual, 'uv') and output_mesh.visual.uv is not None:
+        print(f"  Trimesh object successfully created with UVs, Shape: {output_mesh.visual.uv.shape}")
+    else:
+        print("  ERROR: Trimesh object does NOT have UVs assigned after TextureVisuals call.")
+        raise RuntimeError("Failed to assign UVs to the Trimesh object.")
+
+    print("UV Unwrapping with xatlas: Process complete.")
+    return output_mesh
+
+
 
 async def _run_pipeline_generate_glb(
     outputs: Dict,             # Expected to contain 'mesh': [trimesh_object]
-    mesh_simplify_ratio: float, # Received from args, effectively not used here for simplification
+    mesh_simplify_ratio: float, # Received from args (0-100)
     texture_size: int,          # Used as pack_options.resolution for xatlas
     apply_texture: bool = False,# Placeholder, not used by Hi3DGen core
     output_format: str = "glb",
@@ -296,11 +440,6 @@ async def _run_pipeline_generate_glb(
     Generate final 3D model file (GLB, OBJ, etc.) from Trimesh object.
     Also unwraps UVs using xatlas.
     """
-    # Note: mesh_simplify_ratio is passed but not used for simplification in this flow
-    # to match Hi3DGen's app.py behavior (no simplification after main pipeline).
-    # If simplification were desired, it would be applied to the 'mesh' object here.
-    if mesh_simplify_ratio < 100.0 and mesh_simplify_ratio > 0.0:
-         logger.info(f"Mesh simplification ratio is {mesh_simplify_ratio}, but simplification is not applied in this Hi3DGen API flow.")
 
     def worker(): # This synchronous function will be run in a thread
         try:
@@ -309,84 +448,22 @@ async def _run_pipeline_generate_glb(
             if torch.cuda.is_available(): # Good practice before/after GPU-intensive ops
                 torch.cuda.empty_cache()
             
-            mesh_to_export: trimesh.Trimesh = outputs["mesh"][0] # Start with the raw mesh
+            raw_mesh_trimesh: trimesh.Trimesh = outputs["mesh"][0] # Start with the raw mesh
 
-            if not isinstance(mesh_to_export, trimesh.Trimesh):
-                logger.error(f"Expected a trimesh.Trimesh object, but got {type(mesh_to_export)}")
+            if not isinstance(raw_mesh_trimesh, trimesh.Trimesh):
+                logger.error(f"Expected a trimesh.Trimesh object, but got {type(raw_mesh_trimesh)}")
                 raise ValueError("Invalid mesh object provided for final model generation.")
 
-            logger.info(f"Received mesh for export with {len(mesh_to_export.faces)} faces and {len(mesh_to_export.vertices)} vertices.")
+            logger.info(f"Received mesh for export with {len(raw_mesh_trimesh.faces)} faces and {len(raw_mesh_trimesh.vertices)} vertices.")
+
+            # Convert mesh_simplify_ratio (0-100 from UI, % to reduce by) to reduct_pct (0.0-1.0 for simplify_mesh_open3d)
+            reduction_percentage_float = normalize_meshSimplify_ratio(mesh_simplify_ratio)
+            mesh_to_export = simplify_mesh_open3d(raw_mesh_trimesh, reduction_percentage_float)
 
             if not apply_texture or output_format.lower() == "stl": # STL doesn't support UVs
                 logger.info("Skipping xatlas UV unwrapping / texturing.")
             else:
-                logger.info("Performing UV unwrapping with xatlas...")
-                xatlas_start_time = time.time()
-                
-                # Prepare input data for xatlas
-                input_vertices_orig = mesh_to_export.vertices.astype(np.float32)
-                input_faces_orig = mesh_to_export.faces.astype(np.uint32)
-                # Ensure normals are available for xatlas
-                _ = mesh_to_export.vertex_normals # Access to compute if not present
-                input_normals_orig = np.ascontiguousarray(mesh_to_export.vertex_normals, dtype=np.float32)
-
-                atlas = xatlas.Atlas()
-                atlas.add_mesh(input_vertices_orig, input_faces_orig, input_normals_orig)
-                
-                # Configure xatlas ChartOptions for potentially larger UV islands
-                chart_options = xatlas.ChartOptions()
-                chart_options.max_cost = 8.0  # Allows more distortion for fewer charts
-                chart_options.normal_seam_weight = 1.0 # Less penalty for normal seams
-
-                # Configure xatlas PackOptions
-                pack_options = xatlas.PackOptions()
-                # Use texture_size from args as the target resolution for xatlas packing.
-                # This influences the scale of the UV charts in the atlas.
-                pack_options.resolution = texture_size 
-                pack_options.padding = 2 # Padding in texels between charts
-                
-                logger.info(f"  Running xatlas.generate() with ChartOptions(max_cost={chart_options.max_cost:.1f}, norm_seam_w={chart_options.normal_seam_weight:.1f}), PackOptions(resolution={pack_options.resolution}, pad={pack_options.padding})")
-                atlas.generate(chart_options=chart_options, pack_options=pack_options)
-                logger.info(f"  xatlas generated atlas with dimensions: width={atlas.width}, height={atlas.height}")
-                
-                v_out_xref_data, f_out_indices, uv_coords_from_xatlas = atlas.get_mesh(0)
-                
-                num_new_vertices = uv_coords_from_xatlas.shape[0]
-                if v_out_xref_data.shape == (num_new_vertices,): 
-                    xref_indices = v_out_xref_data.astype(np.uint32) 
-                    if np.any(xref_indices >= input_vertices_orig.shape[0]) or np.any(xref_indices < 0):
-                         raise ValueError("xatlas xref out of bounds for original input vertices.")
-                    final_vertices_spatial = input_vertices_orig[xref_indices]
-                elif v_out_xref_data.shape == (num_new_vertices, 3): 
-                    logger.warning("  xatlas.get_mesh() returned 3D vertex data directly (unexpected for add_mesh).")
-                    final_vertices_spatial = v_out_xref_data.astype(np.float32)
-                else:
-                    raise ValueError(f"Unexpected shape for vertex/xref data from xatlas.get_mesh: {v_out_xref_data.shape}.")
-
-                final_uvs = uv_coords_from_xatlas.astype(np.float32)
-                if np.any(final_uvs > 1.5): # Heuristic for pixel-space UVs
-                    logger.info("  UVs from xatlas appear to be in pixel coordinates. Normalizing...")
-                    if atlas.width > 0 and atlas.height > 0: 
-                        final_uvs /= np.array([atlas.width, atlas.height], dtype=np.float32)
-                    else:
-                        logger.warning("  Atlas width/height is 0, cannot normalize pixel UVs. Using unnormalized.")
-                else:
-                    logger.info(f"  UVs from xatlas appear to be normalized. Min: {final_uvs.min(axis=0) if final_uvs.size > 0 else 'N/A'}, Max: {final_uvs.max(axis=0) if final_uvs.size > 0 else 'N/A'}")
-                
-                # Create new Trimesh object with unwrapped data
-                mesh_to_export = trimesh.Trimesh(vertices=final_vertices_spatial, faces=f_out_indices, process=False)
-                
-                if final_uvs.shape[0] != final_vertices_spatial.shape[0] or final_uvs.ndim != 2 or final_uvs.shape[1] != 2 :
-                    raise ValueError(f"UV shape mismatch before assignment. Expected ({final_vertices_spatial.shape[0]}, 2), got {final_uvs.shape}.")
-                
-                material = trimesh.visual.material.PBRMaterial(name='defaultXatlasMat') # Use a simple default
-                mesh_to_export.visual = trimesh.visual.TextureVisuals(uv=final_uvs, material=material)
-                
-                if not (hasattr(mesh_to_export.visual, 'uv') and mesh_to_export.visual.uv is not None):
-                    raise RuntimeError("Failed to assign UVs to the Trimesh object after xatlas.")
-                
-                logger.info(f"xatlas UV unwrapping complete in {time.time() - xatlas_start_time:.2f}s. New mesh: {len(mesh_to_export.faces)} faces, {len(mesh_to_export.vertices)} vertices.")
-
+                mesh_to_export = unwrap_mesh_with_xatlas(mesh_to_export)
 
             # Texturing: Hi3DGen does not provide an integrated texturing pipeline.
             if apply_texture:

@@ -2,8 +2,9 @@
 diffusers>=0.28.0
 accelerate
 einops
-xatlas==0.0.10
 
+open3d
+xatlas==0.0.10
 embreex
 shapely==2.1.0
 
